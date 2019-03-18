@@ -154,7 +154,7 @@ placeholder ::= ;
 
 m	::= {}
 	; 
-n	:: {}
+n	::= {}
 	;
 
 numeric_type		::=	INTEGER:i	{}

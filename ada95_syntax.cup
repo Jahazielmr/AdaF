@@ -1,321 +1,14 @@
-/*SECCIÓN DE DECLARACIONES PRELIMINARES*/
-
-/* Import the class java_cup.runtime.*  */
 import java_cup.runtime.*;
 import java.util.Stack;
 import java.util.ArrayList;
 import java.util.HashMap;
-/*Métodos que van en la clase de acciones: Poner acá todo lo que debería ser accesible por la gramática*/
-action code{:
 
-/**The current symbol table*/
-LinkedSymbolTable currentScope = null; 
-/**Variables globales para el control de los subprogramas*/
-ArrayList<Type> returns=new ArrayList<Type>();
-int branches=0;
-/*Variables para la generación de código intermedio*/
-//las instrucciones
-ArrayList<Cuadruplo> cuadruplos=new ArrayList<Cuadruplo>();
-public static final int MIPS_TEMPS=9;
-//los temporales cf: http://en.wikipedia.org/wiki/MIPS_architecture
-boolean[] temps=new boolean[MIPS_TEMPS];
-int temp_provisorio=0;
-/**Para obtener el siguiente temporal libre*/
-public String temp_nuevo(){
-	return "%t"+String.valueOf(++temp_provisorio);
-}
-/**La lista de saltos de salida en el loop actual (sólo funciona para salidas inmediatas)*/
-ListaSalto currentExit=null;
-/**Ir imprimiendo el código intermedio al generarlo*/
-public boolean DEBUG=false;
-/*Para agregar cuádruplos a la lista. Sólo generar el cuádruplo si no hay errores.*/
-public void gen(Object op, Object arg1, Object arg2, Object res){
-	//si hay errores y no estamos debugueando, ni siquiera molestarse en seguir:
-	if(!DEBUG && parser.errores.size()>0)
-		return;
-	/*castear a string*/
-	String o=op.toString();
-	String a1=arg1.toString();
-	String a2=arg2.toString();
-	String r=res.toString();
-	//pasar los argumentos a lowercase, para no tener problemas luego con la st.
-	a1=a1.toLowerCase();
-	a2=a2.toLowerCase();
-	Cuadruplo quad=new Cuadruplo(o, a1, a2, r);
-	cuadruplos.add(quad);	
-	if(DEBUG){
-		System.out.println((cuadruplos.size()-1)+"    "+quad.toString());
-	}	
-}
+//DECLARACIÓN DE TERMINALES Y NO TERMINALES
 
-/**Función que devuelve el String que representa a un branch de código intermedio*/
-public String getIf(Object operador){
-	String o=operador.toString();
-	return "if_"+o;
-}
+//Terminales sin valor de retorno:
 
-/**Convierte una literal booleana en un número*/
-public Integer getNumeric(Boolean val){
-	int rv= (val.booleanValue()) ? 1 : 0;
-        return new Integer(rv);
-}
-/**Devuelve la lista de saltos de un valor booleano*/
-public BackPatchResult getBackPatch(Boolean b){
-	BackPatchResult rval=new BackPatchResult();
-	if(b.booleanValue()){
-		rval.verdadera=new ListaSalto(cuadruplos.size());
-		return rval;
-	}else{
-		rval.falsa=new ListaSalto(cuadruplos.size());
-		return rval;
-	}
-}
+//Palabras reservadas
 
-/**Dada una lista de saltos completa los correspondientes cuádruplos con el salto proveido*/
-public void completa(ListaSalto completar, Object con){
-	if(completar.lista.isEmpty())
-		return;
-	int value=0;
-	String salto=con.toString();
-	for(Integer index : completar.lista){
-		//por cualquier cosa
-		value=index.intValue();
-		if(value < cuadruplos.size() && value >=0){
-			cuadruplos.get(value).res=salto;
-		}else if(DEBUG){
-			System.err.println("Se trató de asignar un salto a un cuádruplo inválido; "+
-			index+ ". Hay "+cuadruplos.size()+"  cuádruplos");
-		}
-	}
-}
-
-/**Genera código para la asignación, recibe un ParserResult que corresponde a la expresión
-   si la expresión tiene backpatch, y éste tiene una listaVerdadera o listaFalsa vacías, 
-   genera además el código para completarlas y darles valor
-*/
-public void generar_asignacion(ParserResult expression, Object result){	
-	//esto nunca debería pasar, pero bueno...
-		if(expression.backpatch == null){
-			gen(":=", expression.value, "", result);
-			return;
-		}
-	//todo depende, en realidad, del tipo de la expression: (ya que todas tienen sus listaV y listaF)
-		if(expression.type instanceof BooleanType){
-			completa(expression.backpatch.verdadera, cuadruplos.size());
-			gen(":=", "1", "", result);
-			gen("goto", "", "",cuadruplos.size()+1);
-			completa(expression.backpatch.falsa, cuadruplos.size());
-			gen(":=", "0", "", result);
-		}else{
-			gen(":=", expression.value, "", result);
-		}
-}
-
- /**Esta función chequea que un subprograma que tiene nombre al principio y final tenga exactamente el mismo nombre
-   * @param start la palabra del inicio
-     @param sline, scolumn el left y right del símbolo start
-     @param end la palabra del final
-     @param eline, ecolumn el left y right del símbolo end
- */
-
- public void check_coherence(Object start, int sline, int scolumn, Object end, int eline, int ecolumn){
-	 String s=(String)start;
-	 String sInfo="inicio: "+s+" ["+String.valueOf(sline+1)+" , "+String.valueOf((scolumn-s.length()))+"]";
-	//la funciones pueden no tener el del final:
-	 if(end==null){return;}
-	 String e=(String)end;
-	 String eInfo=" y fin: "+e+" ["+String.valueOf(eline+1)+" , "+String.valueOf(ecolumn+1)+"]";
-	 //ver si son lo mismo:
-	if(!s.equals(e)){
-		//System.err.println("Error sintáctico  : el nombre del subprograma debe coincidir entre "+sInfo+eInfo);
-		parser.errores.add("Error sintáctico  : el nombre del subprograma debe coincidir entre "+sInfo+eInfo);
-	}
-	
-
- }
-/**Método para comprobar errores semánticos de tipo. Los agrega también a la lista de errores. Se vale del método equals de las clases
-   que heredan de Type.
-   @param expected el tipo esperado
-   @param found el tipo encontrado
-   @param foundLine, foundColumn, etc la línea y columna donde se encuentra la declaración.
-*/
-public boolean compare_types(Object expected, Object found, int foundLine, int foundColumn){
-	Type etipo=(Type)expected;
-	Type ftipo=(Type)found;
-	Type e=(etipo instanceof FunctionType)? (((FunctionType)etipo).getRange()) : etipo;
-	Type f=(ftipo instanceof FunctionType)? (((FunctionType)ftipo).getRange()) : ftipo;
-	if(! e.equals(f)){
-		StringBuffer errorMessage=new StringBuffer();
-		errorMessage.append("Se esperaba el tipo "+e.toString());
-		errorMessage.append(" Y se encontró "+f.toString());
-		errorMessage.append(" En línea "+String.valueOf(foundLine+1)+", columna "+String.valueOf(foundColumn+1));
-		parser.errores.add(errorMessage.toString());
-		return false;		
-	}
-	return true;
-}
-/**Método para determinar si un símbolo está o no declarado*/
-public AdaSymbol findSymbol(Object id, int line, int column){
-	AdaSymbol found;
-	found=currentScope.get(id);
-	if(found == null){
-		parser.errores.add(" No se encuentra el símbolo '"+(String)id+"'. En línea "+(String.valueOf(line+1))+", columna "+String.valueOf(column+1));
-		return null;
-	}
-	return found;
-	
-}
-/*Agrega un error a los errores del parser*/
-public void agregarError(String mensaje, int linea, int columna){
-	parser.errores.add(mensaje+". En línea "+String.valueOf(linea+1)+", columna "+String.valueOf(columna+1));
-}
-
-public boolean validateBuiltIn(String method, Object val, int line, int col){
-	if(method.equalsIgnoreCase("put") || method.equalsIgnoreCase("get")){
-	//the value must be an arraylist of Parser Results:
-		if(!(val instanceof ArrayList))
-			return false;
-	//if it is, cast:
-		ArrayList<ParserResult> l=(ArrayList<ParserResult>)val;
-	//now, check that it has only one parameter:
-		if(l.size()!=1){
-			agregarError("La función '"+method+"' solamente admite 1 parámetro, "+String.valueOf(l.size())+" suministrados", line, col);
-			return false;
-		}
-	//it has, so, check that the type is valid: it must be one of the primitive types:
-		return l.get(0).type.isPrimitive();
-		
-	}	
-
-	
-	//invalid method:
-	return false;
-}
-
-:};
-
-/* Métodos que van en la clase del parser */
-parser code {:
-    /**Lista donde se guardan los errores encontrados*/
-    public ArrayList<String> errores=new ArrayList<String>();
-    /**Método para devolver tanto los errores del parser como los  del lexer, si los hay*/
-    public ArrayList<String> getErrores(){
-		if(getScanner() instanceof Ada95Lexer){
-			errores.addAll(((Ada95Lexer)getScanner()).lexical_errors);		
-		}
-		return errores;
-
-	}
-    /**Método que devuelve las advertencias, hasta esta versión, sólo el lexer tiene advertencias...*/
-    public ArrayList<String> getAdvertencias(){
-	ArrayList<String> warnings=new ArrayList<String>();
-	if(getScanner() instanceof Ada95Lexer){
-		warnings.addAll(((Ada95Lexer)getScanner()).lexical_warnings);		
-	}
-	return warnings;
-		
-    }
-    boolean EOFReported=false;
-    Stack<String> unClosed=new Stack<String>();
-    public String getUnclosed(){return unClosed.pop();}
-    public void setUnclosed(String faltante,String abierto, int line, int col){
-	String addToUnClosed="'"+faltante+"'"+" faltante para el '"+abierto+"' abierto en línea "+(line+1)+", columna "+(col+1);
-	unClosed.push(addToUnClosed);
-
-    }
-    public void emptyLastUnclosed(){String tempUnClosed=unClosed.pop();tempUnClosed=null;}
-    	
-    /**Guardar los errores en un stringBuffer*/
-    //StringBuffer errorMessages=new StringBuffer();
-    /* Change the method report_error so it will display the line and
-       column of where the error occurred in the input as well as the
-       reason for the error which is passed into the method in the
-       String 'message'. */
-    public void report_error(String message, Object info) {
-   	
-	/*If the EOF was already reported, just return (to avoid that horrible unexpected EOF...)*/
-	if(EOFReported)
-		return;
-        /* Create a StringBuffer called 'm' with the string 'Error' in it. */
-        StringBuffer m = new StringBuffer();
-        /* Add to the end of the StringBuffer error message created in
-           this method the message that was passed into this method. */
-	if(message.equalsIgnoreCase("Syntax error")){
-		message="Error Sintáctico  ";
-	}else if(message.equalsIgnoreCase("Couldn't repair and continue parse")){
-		message="Error ";
-	}	
-        m.append(message);
-   
-        /* Check if the information passed to the method is the same
-           type as the type java_cup.runtime.Symbol. */
-        if (info instanceof java_cup.runtime.Symbol) {
-            /* Declare a java_cup.runtime.Symbol object 's' with the
-               information in the object info that is being typecasted
-               as a java_cup.runtime.Symbol object. */
-            java_cup.runtime.Symbol s = ((java_cup.runtime.Symbol) info);
-   
-            /* Check if the line number in the input is greater or
-               equal to zero. */
-            if (s.left >= 0) {                
-                /* Add to the end of the StringBuffer error message
-                   the line number of the error in the input. */
-                m.append(": en línea "+(s.left+1));   
-                /* Check if the column number in the input is greater
-                   or equal to zero. */
-                if (s.right >= 0) {                   
-                    /* Add to the end of the StringBuffer error message
-                       the column number of the error in the input. */
-                    m.append(", columna "+(s.right+1));
-		   //ver si se puede sacar el texto:
-		   if(getScanner() instanceof Ada95Lexer){
-			m.append("; no se esperaba '"+((Ada95Lexer)getScanner()).getCurrentText()+"'");
-		   }
-		}
-	///guardar el error en la variable de errores:
-            }else if(s.toString().equals("#0")){
-			if(unClosed.empty()){				
-				m.append(": final de archivo inesperado");
-			}else{
-				m.append(": "+getUnclosed());
-				EOFReported=true;
-			}
-
-		}
-
-        }
-   
-   
-        /* Print the contents of the StringBuffer 'm', which contains
-           an error message, out on a line. */
-        //System.err.println(m);
-	errores.add(m.toString());
-	/*Guardar el error en el buffer, mas un salto de línea:*/
-	//	errorMessages.append(m+"\n");
-    }
-   
-    /* Change the method report_fatal_error so when it reports a fatal
-       error it will display the line and column number of where the
-       fatal error occurred in the input as well as the reason for the
-       fatal error which is passed into the method in the object
-       'message' and then exit.*/
-    public void report_fatal_error(String message, Object info) {
-        report_error(message, info);
-
-        //System.exit(1);
-    }
- /**La función que guarda errores para luego ser impresos por el front-end
-*@param line, column la línea y columna del error/
-public void push_error(int line, int column){
-	errores.add(new String(String.valueOf(line)+"_"+String.valueOf(column)));
-	System.out.println(errores);
-}*/
-
-:};
-
-/*SECCIÓN DE DECLARACIÓN DE TERMINALES Y NO TERMINALES*/
-//primero, las terminales sin valor de retorno:
-//1. Palabras reservadas (en filas por orden alfabético):
 terminal ABORT, ABS, ABSTRACT, ACCEPT, ACCESS, ALIASED, ALL, AND, ARRAY, AT;
 terminal BEGIN, BODY;
 terminal CASE, CONSTANT;
@@ -335,7 +28,9 @@ terminal TAGGED, TASK, TERMINATE, THEN, TYPE;
 terminal UNTIL, USE;
 terminal WHEN, WHILE, WITH;
 terminal XOR;
-//2. Delimitadores
+
+//Delimitadores
+
 terminal CONCATENATE;
 terminal TICK;
 terminal LEFTPAR, RIGHTPAR;
@@ -353,15 +48,21 @@ terminal EXPONENTIATE;
 terminal ASSIGNMENT;
 terminal LEFTLABEL, RIGHTLABEL;
 terminal BOX;
-//3. Las funciones empotradas:
+
+// Funciones empotradas
+
 terminal PUT, GET;
-//4. los tipos primitivos:
+
+// Tipos primitivos
+
 terminal BOOLEAN, INTEGER, FLOAT;
 
-//los diz-que-operadores:
+// Operadores Logicos
+
 terminal AND_THEN, OR_ELSE;
-//terminal NOT_IN;
-//ahora las que sí tienen valores de retorno:
+
+// Terminales con valor de retorno
+
 terminal String IDENTIFIER;
 //terminal Number	NUMERIC_LITERAL;
 terminal Integer INTEGER_LITERAL;
@@ -370,34 +71,31 @@ terminal String CHARACTER_LITERAL;
 terminal String STRING_LITERAL;	
 terminal Boolean BOOLEAN_LITERAL;
 
-/*Sección de las no-terminales; iremos en el orden del RM*/
-//INICIALES:
+
+
+// NO TERMINALES 
+//INICIALES
+
 non terminal goal, placeholder, m, n;
-//lexicos y varios
-//de p85-persch, pag 87
 non terminal constant_option;
 non terminal primitive_type,numeric_type;
 non terminal identifier, identifier_list, argument_list, argument;
 non terminal declaration, object_declaration, initialization_option, number_declaration;
 non terminal type_declaration, discriminant_part_option, type_definition;
 non terminal subtype_declaration, subtype_indication;
-//de p85-persch, pag 88
 non terminal subtype_indication_with_constraint, range_constraint, range;
 non terminal accuracy_constraint, floating_point_constraint, range_constraint_option, fixed_point_constraint;
 non terminal discrete_range;
 non terminal record_type_definition, component_list;
-//de p85-persch, pag 89
 non terminal component_declaration_list, variant_part_option, component_declaration, discriminant_part;
 non terminal discriminant_declaration_list, discriminant_declaration;
 non terminal variant_part, variant_list;
 non terminal choice, choice_list;
 non terminal incomplete_type_declaration;
 non terminal declarative_part, declarative_item_list, declarative_item;
-//de p85-persch, pag 90
 non terminal name;
 non terminal selected_component, literal, aggregate, component_association_list, component_association;
 non terminal expression;
-//de p85-persch, pag 91
 non terminal and_expression, or_expression, xor_expression, andthen_expression, orelse_expression;
 non terminal relation;
 non terminal membership_operator;
@@ -406,20 +104,17 @@ non terminal primary;
 non terminal relational_operator, adding_operator, unary_operator, multiplying_operator;
 non terminal qualified_expression, allocator;
 non terminal sequence_of_statements, statement;
-//de p85-persch, pag 92
 non terminal label_list;
 non terminal simple_statement, compound_statement;
 non terminal label;
 non terminal null_statement, assignment_statement;
 non terminal if_statement, elsif_list, else_option, condition, if_header;
 non terminal loop_statement, basic_loop;
-//de p85-persch, pag 93:
 non terminal iteration_clause_option;
 non terminal block, declare_part_option;
 non terminal exit_statement, name_option, when_option;
 non terminal return_statement, goto_statement;
 non terminal subprogram_declaration, subprogram_specification, subprogram_specification_is;
-//de p85-persch, pag 94:
 non terminal designator, operator_symbol;
 non terminal formal_part, formal_part_option;
 non terminal parameter_declaration_list, parameter_declaration;
@@ -428,16 +123,12 @@ non terminal subprogram_body;
 non terminal designator_option;
 non terminal procedure_call,function_call;
 non terminal actual_parameter_part;
-//de p85-persch, pag 95:
-//de p85-persch, pag 96:
 non terminal compilation, compilation_list;
-//de p85-persch, pag 97:
 non terminal compilation_unit;
-//de p85-persch, pag 98:
 non terminal code_statement;
 
-/*SECCIÓN DE PRECEDENCIA Y ASOCIATIVIDAD DE TERMINALES*/
-//ordenados de menor a mayor precedencia:
+//PRECEDENCIA Y ASOCIATIVIDAD DE TERMINALES
+
 precedence left AND;
 precedence left OR;
 precedence left XOR;
@@ -449,264 +140,88 @@ precedence left EXPONENTIATE, NOT, ABS;
 precedence left AND_THEN, OR_ELSE;
 //precedence left IN, NOT_IN;
 
-/*SECCIÓN DE LA GRAMÁTICA*/
+
+//Gramatica
+
 start with goal;
-//elementos opcionales comunes:
-constant_option	::=	| CONSTANT {:RESULT=true;:};
-//empezamos con goal, que será una unidad de compilación:
 
-goal	::=	compilation:g {:
-if(parser.errores.size() == 0){	
-	if(DEBUG){
-		int i=0;
-		for(Cuadruplo c: cuadruplos){
-			System.out.println(i+"\t"+c.toString());
-			i++;
-		}
-	}
-	//aplanar las tablas de símbolos
-	if(currentScope != null){
-		FlatSymbolTable tabla=new FlatSymbolTable(currentScope);
-		RESULT=new FrontEndResult(cuadruplos, tabla);
-	}
-}else{
-	RESULT=null;
-}
-:}
+constant_option	::=	| CONSTANT {};
+
+goal	::=	compilation:g {}
 	;
-//works as a marker, as described in the book, to let action code be executed at otherwise impossible places (like the end)
+
 placeholder ::= ;
-/*M y N son dos producciones de ayuda: no producen nada pero hacen un par de cosas para ayudar a backpatching
-M agarra el siguiente cuádruplo en el flujo de instrucciones
-N devuelve una lista de siguientes y genera un goto vacío
-*/
-m	::=/*lambda*/ {:RESULT=new ParserResult(new Integer(cuadruplos.size()));:}
+
+m	::= {}
 	; 
-n	::=/*lambda*/ {:BackPatchResult br= new BackPatchResult(new ListaSalto(cuadruplos.size()));
-			gen("goto", " ", "", "");
-			RESULT=new ParserResult(br);
-		      :}
+n	:: {}
 	;
 
-//RM-2  LEXICAL ELEMENTS AND COMPILER-SPECIFIC RULES:
-numeric_type		::=	INTEGER:i	{:RESULT=new Integer(i);:}
-			|	FLOAT:f   {:RESULT=new Float(f);:}
+numeric_type		::=	INTEGER:i	{}
+			|	FLOAT:f   {}
 			;
-primitive_type 		::=	BOOLEAN:b {:RESULT=new Boolean(b);:}
-			|	numeric_type:t {:RESULT=t;:}
+primitive_type 		::=	BOOLEAN:b {}
+			|	numeric_type:t {}
 			;
-identifier	::=	IDENTIFIER:i {:RESULT=i;:}
+identifier	::=	IDENTIFIER:i {}
 		;
 argument_list	::=	argument:a
-			{:if(a != null){
-			 ArrayList<ParserResult> r=new ArrayList<ParserResult>();
-			  r.add((ParserResult)a);
-			  RESULT=r;
-			}
-			:}
-		|	argument_list:l COMMA argument:a
-			{:if(a != null){
-			  ArrayList<ParserResult> r=new ArrayList<ParserResult>();
-			  r.addAll((ArrayList<ParserResult>)l);
-			  r.add((ParserResult)a);
-			  RESULT=r;
-			 }else{RESULT=l;}			
-			:}
+			{}
 		;
 argument	::=	expression:e 
-			{:RESULT=e;:}
-/*In subprogram calls, named parameter notation (i.e. the name of the formal parameter followed of the symbol => and then the actual parameter) allows the rearrangement of the parameters in the call: ¡Habría que tener una tabla de símbolos en la función también!*/		
-		|	identifier ARROW expression
-			/*Habría que, mágicamente, saber el nombre de la función para buscar los ids en la tabla de símbolos...O pasarlos y buscar arriba*/
+			{}
 		; 
 
-//RM-3: DECLARATIONS
+//Declaraciones
+
 declaration	::=	object_declaration
 		|	type_declaration
 		|	subprogram_declaration
 		|	subtype_declaration
 		|	number_declaration
 		;
-//de p85-persch, pag 87
-/*si las variables están inicializadas, chequear los tipos, y si concuerdan, ponerla en la tabla de símbolos actual */
+
 object_declaration	::=	identifier:i COLON constant_option:c subtype_indication:s  initialization_option:o SEMICOLON
-				{:ParserResult ps=(ParserResult)s; 
-				//if the type is null, there was an error down the tree (and is already reported)
-				if (ps.type != null){				
-				boolean isConstant=(c != null); 
-				if(((String)ps.value).equalsIgnoreCase(ps.type.name)){
-				if(o != null){			
-					ParserResult po=(ParserResult)o;
-					boolean compare=compare_types(ps.type, po.type, oleft, oright);
-					//Type tipo=compare ? ps.type : new ErrorType(ps.type);					
-					Type tipo=ps.type;
-					if(!currentScope.put(i, new AdaSymbol(tipo, isConstant)))
-						agregarError("El identificador "+((String)i)+" ya ha sido declarado", ileft, iright);
-					else //hay inicialización y todo está bien:
-						generar_asignacion(po, i);
-				}else{//there's no initialization expression:
-				   if(isConstant)
-					agregarError("La declaración de un objeto constante requiere una expresión de inicialización", ileft, iright);					        if(!currentScope.put(i, new AdaSymbol(ps.type)))
-					agregarError("El identificador "+((String)i)+" ya ha sido declarado", ileft, iright);
-				   	
-				}
-				}else{//s no es un subtipo de nada:
-					agregarError("'"+((String)ps.value)+"' no ha sido declarado como subtipo", sleft, sright);	
-				}
-					
-				}:}
-			|	identifier_list:i COLON constant_option:c subtype_indication:s  initialization_option:o SEMICOLON
-				{:
-				ParserResult ps=(ParserResult)s; 
-				if (ps.type != null){
-				ArrayList<String> il=(ArrayList<String>)i;
-				boolean isConstant=(c != null); 
-				if(((String)ps.value).equalsIgnoreCase(ps.type.name)){
-				if(o != null){				
-					ParserResult po=(ParserResult)o;
-					boolean compare=compare_types(ps.type, po.type, oleft, oright);
-					//Type tipo=compare ? ps.type : new ErrorType(ps.type);					
-					Type tipo=ps.type;
-					for(String id:il){
-						if(!currentScope.put(id, new AdaSymbol(tipo, isConstant)))
-							agregarError("El identificador "+id+" ya ha sido declarado", ileft, iright);
-						else
-							generar_asignacion(po, id);
-					}	
-				}else{//there's no initialization expression:
-				   if(isConstant)
-					agregarError("La declaración de un objeto constante requiere una expresión de inicialización", ileft, iright);	  
-				   for(String id:il){
-					if(!currentScope.put(id, new AdaSymbol(ps.type)))
-						agregarError("El identificador "+id+" ya ha sido declarado", ileft, iright);
-				   }	
-				}
-				}else{
-					agregarError("'"+((String)ps.value)+"' no ha sido declarado como subtipo", sleft, sright);
-	
-				}
-				}:}
+				{}
 			;
-initialization_option	::=	| ASSIGNMENT expression:e {:RESULT=e;:}
+initialization_option	::=	| ASSIGNMENT expression:e {}
 			;
 number_declaration	::=	identifier:i COLON CONSTANT ASSIGNMENT expression:o SEMICOLON
-				{:if(o != null){
-				  ParserResult po=(ParserResult)o;
-			          if(!currentScope.put(i, new AdaSymbol(po.type, true)))
-					agregarError("El identificador "+((String)i)+" ya ha sido declarado", ileft, iright);
-				  else
-					generar_asignacion(po, i);
-				  }
-				:}
-			|	identifier_list:i COLON CONSTANT ASSIGNMENT expression:o SEMICOLON
-				{:if(o != null){
-				ParserResult po=(ParserResult)o;ArrayList<String> pi=(ArrayList<String>)i;
-				for(String id:pi){
-					if(!currentScope.put(id, new AdaSymbol(po.type, true)))
-						agregarError("El identificador "+id+" ya ha sido declarado", ileft, iright);
-					else
-						generar_asignacion(po, id);
-				}	
-				}  		
-				:}
+				{}
 			;
 identifier_list		::=	identifier:i COMMA identifier:j 
-				{:ArrayList<String>r=new ArrayList<String>();
-				  r.add((String)i); r.add((String)j);
-				  RESULT=r;		
-				:}
-			|	 identifier_list:i COMMA identifier:j
-				{:ArrayList<String> r =new ArrayList<String>();
-				  r.addAll((ArrayList<String>)i);r.add((String)j);	
-				  RESULT=r;	
-				:}
+				{}
 			;
-/*TODO: ver qué ondas con la discriminant part: cf. en.wikibooks.org/wiki/Ada_Programming/Types/record */
+
 type_declaration	::=	TYPE identifier:i 
-				 discriminant_part_option:p IS {:gen("record", i.toString(), "", "");:} type_definition:t SEMICOLON 
-				{:
-				//viene una tabla de símbolos: porque siempre son records
-				LinkedSymbolTable table=(LinkedSymbolTable)t;
-				if(!currentScope.put(i, new AdaSymbol(new RecordType(((String)i),table)))){
-					agregarError("El tipo '"+((String)i)+"' ya ha sido declarado", ileft, iright);
-				}else{
-					table.id=i.toString().toLowerCase();
-					table.ancestor=currentScope;
-					currentScope.addChild(table);
-					gen("initRecord",table.getFlatId(),String.valueOf(table.desplazamiento), "" );					      	      gen("exit", table.getFlatId(), "", "");
-				}
-				:}
+				 discriminant_part_option:p IS {} type_definition:t SEMICOLON 
+				{}
 			|	incomplete_type_declaration
 			;
 discriminant_part_option ::=	| discriminant_part
 			;
-type_definition		::=	record_type_definition:r {:parser.emptyLastUnclosed();RESULT=r;:}
+type_definition		::=	record_type_definition:r {}
 			;
 subtype_declaration	::=	SUBTYPE identifier:i IS subtype_indication:s SEMICOLON
-				{:
-					ParserResult ps=(ParserResult)s;
-					if(ps.type!= null){
-					if(((String)ps.value).equalsIgnoreCase(ps.type.name)){
-						Type t=ps.type;
-						t.name=(String)i;
-						//se pone un nuevo tipo con otro nombre:
-						if(!currentScope.put(i, new AdaSymbol(t, true))){
-							agregarError("El tipo '"+((String)i)+"' ya ha sido declarado", ileft, iright);
-						}
-					}
-					}else{
-						agregarError("'"+((String)ps.value)+"' no ha sido declarado como subtipo", sleft, sright);
-					}
-				:}
+				{}
 			;
-/*Searching for a name actually checks if the type is declared*/
-subtype_indication	::=	name:n {:RESULT=n;:}
-			|	subtype_indication_with_constraint:c {:RESULT=c;:}
-			|	primitive_type:t {:RESULT=t;:}
+
+subtype_indication	::=	name:n {}
+			|	subtype_indication_with_constraint:c {}
+			|	primitive_type:t {}
 			;
-//de p85-persch, pag 88
-//TODO: define this, the constraints must be of the same type as the name...
+
 subtype_indication_with_constraint ::=	name range_constraint
 				   |	name accuracy_constraint
-				   |	numeric_type:n range_constraint {:RESULT=n;:}
-				   |	FLOAT 	accuracy_constraint {:RESULT=new ParserResult(new FloatType());:}
+				   |	numeric_type:n range_constraint {}
+				   |	FLOAT 	accuracy_constraint {}
 		         	   ;
 range_constraint		   ::= RANGE range
 				   ;
 range	::=	simple_expression:t DOUBLEDOT simple_expression:f
-		{:
-					if ((t != null) && (f != null)){
-							
-					 ParserResult pr=(ParserResult)t;
-					 ParserResult qr=(ParserResult)f;
-					 if((pr.type != null) && (qr.type != null)){
-					 Type ptipo=(pr.type instanceof FunctionType)? (((FunctionType)pr.type).getRange()) : pr.type;
-					 Type qtipo=(qr.type instanceof FunctionType)? (((FunctionType)qr.type).getRange()) : qr.type;
-						if(ptipo.isDiscrete() && qtipo.isDiscrete()){
-							//comparar los tipos!
-							if(compare_types(ptipo,qtipo, fleft, fright)){
-								ArrayList<Object> rVal=new ArrayList<Object>();
-								rVal.add(pr.value);
-								rVal.add(qr.value);
-								RESULT=new ParserResult(rVal, ptipo);
-							}else{ 
-								RESULT= null;
-							}
-						}else{
-							//determine who's to blame:
-							if(!ptipo.isDiscrete())
-							    agregarError("Se esperaba un tipo discreto y se encontró "+ptipo.toString(), tleft, tright);
-							else 
-							    agregarError("Se esperaba un tipo discreto y se encontró "+qtipo.toString(), fleft, fright);
-							RESULT=null;
-						}
-						
-					}	
-					}	
-		
-		:}
+		{}
 	;
-//quité la enumeration type definition
+
 accuracy_constraint		::=	floating_point_constraint
 				|	fixed_point_constraint
 				;
@@ -716,55 +231,26 @@ range_constraint_option		::=	| range_constraint
 				;
 fixed_point_constraint		::=	DELTA simple_expression range_constraint_option
 				;
-//no pongo lo de array ni index
-/*Sólo vamos a permitir rangos sencillos...*/
 discrete_range			::=	name range_constraint_option
 				|	numeric_type range_constraint_option
-				|	range:r {:RESULT=r;:}
+				|	range:r {}
 				;
 record_type_definition		::=	RECORD:r  
-					{:parser.setUnclosed("end record;", "record", rleft,rright );:} 
-						component_list:l //returns a symbol table
-						{:RESULT=l;:}
+					{}
 					END RECORD 
 				;
-/*TODO: ver qué ondas con la variant part*/
-component_list			::=	component_declaration_list:l {:RESULT=l;:} variant_part_option 
-				|	NULL {:RESULT=new LinkedSymbolTable();:}SEMICOLON
+
+component_list			::=	component_declaration_list:l {} variant_part_option 
+				|	NULL {}SEMICOLON
 				;
-//de p85-persch, pag 89			
-/*TODO: check that this works, having code in a lambda production...*/
-component_declaration_list	::=	{:RESULT=new LinkedSymbolTable();:}
+
+component_declaration_list	::=	{}
 				|	 component_declaration_list:l component_declaration:c
-					{:LinkedSymbolTable t=(LinkedSymbolTable)l;
-					  //the components are parserResults: en el valor viene el nombre.
-					//c puede ser una lista o un solo elemento:
-					if(c != null){	
-					  if(!(c instanceof ArrayList)){
-					 	 ParserResult p=(ParserResult)c;
-						  if(!t.put(p.value, new AdaSymbol(p.type))){
-							agregarError("El componente '"+((String)p.value)+
-							"' ya ha sido declarado en este registro.", cleft, cright);
-						  }
-					  }else{//sí es una lista:
-						ArrayList<ParserResult> lc=(ArrayList<ParserResult>)c;
-						for(ParserResult p: lc){
-						  if(!t.put(p.value, new AdaSymbol(p.type))){
-							agregarError("El componente '"+((String)p.value)+
-							"' ya ha sido declarado en este registro.", cleft, cright);
-						  }//no se pudo meter el id
-							
-						}//iterar en c
-					  }//c es una lista
-				
-					}//c existe
-					//subir la tabla de símbolos:
-					RESULT=t;
-					:}
+					{}
 				;
 variant_part_option		::=	| variant_part
 				;
-component_declaration		::=	discriminant_declaration:d {:RESULT=d;:} SEMICOLON 
+component_declaration		::=	discriminant_declaration:d {} SEMICOLON 
 				|	error 
 				;
 discriminant_part		::=	LEFTPAR discriminant_declaration_list RIGHTPAR
@@ -773,67 +259,9 @@ discriminant_declaration_list	::=	discriminant_declaration
 				|	discriminant_declaration_list SEMICOLON discriminant_declaration
 				;
 discriminant_declaration	::=	identifier:i COLON subtype_indication:s initialization_option:o
-					{://ver si el tipo existe. Si existe, ver si coincide con la inicialización.
-					  //si algo malo pasa, devolver null.
-					  ParserResult ps=(ParserResult)s;
-					  if(ps.type != null){//si el tipo sí fue encontrado:
-						if(((String)ps.value).equalsIgnoreCase(ps.type.name)) //si el tipo ES un tipo:
-							if(o != null){//ver si el tipo de o coincide con el de s:
-								 ParserResult po=(ParserResult)o;
-								 if(compare_types(ps.type, po.type, oleft, oright)){
-									generar_asignacion(po, i);
-								 }
-								 //Type tipo=compare ? ps.type : new ErrorType(ps.type);
-								 Type tipo=ps.type;
-								 RESULT=new ParserResult(i, tipo);
-							}else{//no hay inicialización:
-								RESULT=new ParserResult(i, ps.type);
-							}
-						  else{
-							RESULT=new ParserResult(i);
-							agregarError("'"+((String)ps.value)+"' no ha sido declarado como subtipo", sleft, sright);
-						  }
-					  }else{//el tipo no fue encontrado
-						RESULT=null;
-					  }
-					:}
+					{}
 				|	identifier_list:l COLON subtype_indication:s initialization_option:o
-					{:
-					  ParserResult ps=(ParserResult)s;
-					  ArrayList<String> il=(ArrayList<String>)l;
-					  if(ps.type != null){//si el tipo sí fue encontrado:
-						ArrayList<ParserResult> r=new ArrayList<ParserResult>();
-						if(((String)ps.value).equalsIgnoreCase(ps.type.name)){
-							if(o != null){//ver si el tipo de o coincide con el de s:
-								 ParserResult po=(ParserResult)o;
-								 boolean compare=compare_types(ps.type, po.type, oleft, oright);
-								 //Type tipo=compare ? ps.type : new ErrorType(ps.type);
-								 Type tipo=ps.type;
-								 for(String id: il){		
-									if(compare){
-										generar_asignacion(po, id);
-									}				
-									r.add(new ParserResult(id, tipo));					
-								 }
-								 RESULT=r;
-							}else{//no hay inicialización:
-								 for(String id: il){						
-									r.add(new ParserResult(id, ps.type));					
-								 }
-								 RESULT=r;
-							}
-						}else{
-							for(String id:il){
-								r.add(new ParserResult(id));
-							}
-							RESULT=r;
-							agregarError("'"+((String)ps.value)+"' no ha sido declarado como subtipo", sleft, sright);
-						}
-					  }else{
-						RESULT=null;
-					  }
-						
-					:}
+					{}
 				;
 variant_part 			::=	CASE name IS variant_list END CASE SEMICOLON
 				;
@@ -857,70 +285,27 @@ declarative_item		::=	declaration
 				|	subprogram_body
 				|	error SEMICOLON 
 				;
-//de p85-persch, pag 90
-//"No vamos a manejar atributos", por tanto, quité la regla que produce attribute
-//quité la de indexed_component:
-/*Siempre que se llama a name se asume que ya está en la tabla de símbolos, por tanto, lo buscaremos aquí. Como un selected component
-ya busca en la tabla de símbolos y también una llamada a función, así las dejaremos. (Además, éstas se sirven de name!)*/
+
 name				::=	identifier:i 
-					{://buscar el nombre en la tabla de símbolos:
-					  AdaSymbol f=findSymbol(i, ileft, iright);
-					  if(f!= null)
-						RESULT=new ParserResult(i, f.type);						 
-					  else
-						RESULT=new ParserResult(i);
-					:}
-				|	selected_component:s {:RESULT=s;:}
-				|	function_call:f {:RESULT=f;:}
+					{}
+				|	selected_component:s {}
+				|	function_call:f {}
 				|	operator_symbol:i 
-					{://buscar el nombre en la tabla de símbolos:					  
-					  ParserResult pi=(ParserResult)i;
-					  //AdaSymbol f=findSymbol(pi.value, ileft, iright);
-					  /*Si no lo encuentra, asumamos que es un string normal...*/
-					  AdaSymbol f=currentScope.get(pi.value);					  
-					  if(f!= null)
-						RESULT=new ParserResult(i, f.type);						 
-					  else
-						//RESULT=new ParserResult(i);
-						RESULT=pi;
-					:}
+					{}
 				;
-/*The only case of this is in records, isn't it?*/
+
 selected_component		::=	name:n POINT identifier:i 
-					{:
-					//the selected component query:
-						ParserResult namen=(ParserResult)n;
-						String valex=((String)namen.value)+"."+((String)i);
-						Type t=null;
-					//query for it in the current scope:
-						AdaSymbol f=currentScope.get(valex);		
-						if (f !=null)//found:
-							t=f.type;
-						else
-							parser.errores.add("No se puede encontrar el componente '"+((String)i)+
-							"' para el prefijo '"+((String)namen.value)+ "'. En línea "+String.valueOf(nleft+1)+
-							", columna "+String.valueOf(nright+1));
-						RESULT=new ParserResult(valex, t);
-					:}
-				/*Actually, all is for referring to the pointed to object by an access name (a pointer?)*/
-				|	name:n POINT ALL {:
-					AdaSymbol f=findSymbol(n, nleft, nright);
-					if(f != null)
-						RESULT=new ParserResult(n, f.type);
-					else
-						RESULT=new ParserResult(n);
-					:}
-				/*This would have a code similar to the first alternative, BUT this one is not applicable to records...*/
+					{}
+				|	name:n POINT ALL {}
 				|	name POINT operator_symbol
 				;
-//pongo acá los string literals?
-literal				::=	INTEGER_LITERAL:i	{:RESULT=new ParserResult(i, new IntegerType());:}
-				|	FLOATING_POINT_LITERAL:f	{:RESULT= new ParserResult(f, new FloatType());:}
-				|	CHARACTER_LITERAL:c	{:RESULT= new ParserResult(c, new StringType(1));:}
+
+literal				::=	INTEGER_LITERAL:i	{}
+				|	FLOATING_POINT_LITERAL:f	{}
+				|	CHARACTER_LITERAL:c	{}
 				|	BOOLEAN_LITERAL:b	
-					{:RESULT= new ParserResult(getNumeric(b), new BooleanType(), getBackPatch(b));
-					  gen("goto", " ", "", "");:}
-				|	NULL:n		  	{:RESULT= new ParserResult(n);:}
+					{}
+				|	NULL:n		  	{}
 					
 				;
 aggregate			::=	LEFTPAR component_association_list RIGHTPAR
@@ -932,1697 +317,307 @@ component_association_list	::=	component_association COMMA component_association
 component_association		::=	expression
 				|	choice_list ARROW expression
 				;
-expression			::=	relation:e 	{:RESULT=e;:}
-				|	and_expression:e {:RESULT=e;:}
-				|	or_expression:e {:RESULT=e;:}
-				|	xor_expression:e {:RESULT=e;:}
-				|	andthen_expression:e {:RESULT=e;:}
-				|	orelse_expression:e {:RESULT=e;:}
+expression			::=	relation:e 	{}
+				|	and_expression:e {}
+				|	or_expression:e {}
+				|	xor_expression:e {}
+				|	andthen_expression:e {}
+				|	orelse_expression:e {}
 				;
 //de p85-persch, pag 91
 and_expression			::=	relation:p AND m:m relation:q
-					{:
-					if((p != null) && (q != null)){
-					
-					 ParserResult pr=(ParserResult)p;
-					 ParserResult qr=(ParserResult)q;
-					 ParserResult mr=(ParserResult)m;
-					 if((pr.type != null) && (qr.type != null)){
-					 Type ptipo=(pr.type instanceof FunctionType)? (((FunctionType)pr.type).getRange()) : pr.type;
-					 Type qtipo=(qr.type instanceof FunctionType)? (((FunctionType)qr.type).getRange()) : qr.type;
-						if((ptipo instanceof BooleanType) && (qtipo instanceof BooleanType)){
-							//comparar los tipos!
-							//TODO: make the actual operation! (Have a function that does math operations...)
-							if(compare_types(ptipo,qtipo, qleft, qright)){
-								completa(pr.backpatch.verdadera, mr.value);
-								RESULT=new ParserResult(ptipo, 
-								new BackPatchResult(
-									qr.backpatch.verdadera,	
-									ListaSalto.fusiona(pr.backpatch.falsa, qr.backpatch.falsa)
-								));
-							}else{ 
-								RESULT= null;
-							}
-						}else{
-							//determine who's to blame:
-							if(qtipo instanceof BooleanType)
-							    agregarError("Se esperaba un tipo booleano y se encontró "+ptipo.toString(), pleft, pright);
-							else 
-							    agregarError("Se esperaba un tipo booleano y se encontró "+qtipo.toString(), qleft, qright);
-							RESULT=null;
-						}
-						
-					 }
-				
-					}
-					:}
+					{}
 				|	and_expression:p AND m:m relation:q
-					{:
-					if((p != null) && (q != null)){
-					
-					 ParserResult pr=(ParserResult)p;
-					 ParserResult qr=(ParserResult)q;
-					 ParserResult mr=(ParserResult)m;
-					 if((pr.type != null) && (qr.type != null)){
-					 Type ptipo=(pr.type instanceof FunctionType)? (((FunctionType)pr.type).getRange()) : pr.type;
-					 Type qtipo=(qr.type instanceof FunctionType)? (((FunctionType)qr.type).getRange()) : qr.type;
-						if((ptipo instanceof BooleanType) && (qtipo instanceof BooleanType)){
-							//comparar los tipos!
-							//TODO: make the actual operation! (Have a function that does math operations...)
-							if(compare_types(ptipo,qtipo, qleft, qright)){
-								completa(pr.backpatch.verdadera, mr.value);
-								RESULT=new ParserResult(ptipo, 
-								new BackPatchResult(
-									qr.backpatch.verdadera,	
-									ListaSalto.fusiona(pr.backpatch.falsa, qr.backpatch.falsa)
-								));
-							}else{ 
-								RESULT= null;
-							}
-						}else{
-							//determine who's to blame:
-							if(qtipo instanceof BooleanType)
-							    agregarError("Se esperaba un tipo booleano y se encontró "+ptipo.toString(), pleft, pright);
-							else 
-							    agregarError("Se esperaba un tipo booleano y se encontró "+qtipo.toString(), qleft, qright);
-							RESULT=null;
-						}
-						
-					 }
-				
-					}
-					:}
+					{}
 				;
 or_expression			::=	relation:p OR m:m relation:q
-					{:
-					if((p != null) && (q != null)){
-					
-					 ParserResult pr=(ParserResult)p;
-					 ParserResult qr=(ParserResult)q;
-					 ParserResult mr=(ParserResult)m;
-					 if((pr.type != null) && (qr.type != null)){
-					 Type ptipo=(pr.type instanceof FunctionType)? (((FunctionType)pr.type).getRange()) : pr.type;
-					 Type qtipo=(qr.type instanceof FunctionType)? (((FunctionType)qr.type).getRange()) : qr.type;
-						if((ptipo instanceof BooleanType) && (qtipo instanceof BooleanType)){
-							//comparar los tipos!
-							if(compare_types(ptipo,qtipo, qleft, qright)){							
-								completa(pr.backpatch.falsa, mr.value);
-								RESULT=new ParserResult(ptipo, 
-								new BackPatchResult(
-									ListaSalto.fusiona(pr.backpatch.verdadera, qr.backpatch.verdadera),
-									qr.backpatch.falsa
-								));
-							}else{ 
-								RESULT= null;
-							}
-						}else{
-							//determine who's to blame:
-							if(qtipo instanceof BooleanType)
-							    agregarError("Se esperaba un tipo booleano y se encontró "+ptipo.toString(), pleft, pright);
-							else 
-							    agregarError("Se esperaba un tipo booleano y se encontró "+qtipo.toString(), qleft, qright);
-							RESULT=null;
-						}
-						
-					 }
-				
-					}
-					:}
+					{}
 				|	or_expression:p OR m:m relation:q
-					{:
-					if((p != null) && (q != null)){
-					
-					 ParserResult pr=(ParserResult)p;
-					 ParserResult qr=(ParserResult)q;
-					 ParserResult mr=(ParserResult)m;
-					 if((pr.type != null) && (qr.type != null)){
-					 Type ptipo=(pr.type instanceof FunctionType)? (((FunctionType)pr.type).getRange()) : pr.type;
-					 Type qtipo=(qr.type instanceof FunctionType)? (((FunctionType)qr.type).getRange()) : qr.type;
-						if((ptipo instanceof BooleanType) && (qtipo instanceof BooleanType)){
-							//comparar los tipos!
-							//TODO: make the actual operation! (Have a function that does math operations...)
-							if(compare_types(ptipo,qtipo, qleft, qright)){
-								completa(pr.backpatch.falsa, mr.value);
-								RESULT=new ParserResult(ptipo, 
-								new BackPatchResult(
-									ListaSalto.fusiona(pr.backpatch.verdadera, qr.backpatch.verdadera),
-									qr.backpatch.falsa
-								));
-							}else{ 
-								RESULT= null;
-							}
-						}else{
-							//determine who's to blame:
-							if(qtipo instanceof BooleanType)
-							    agregarError("Se esperaba un tipo booleano y se encontró "+ptipo.toString(), pleft, pright);
-							else 
-							    agregarError("Se esperaba un tipo booleano y se encontró "+qtipo.toString(), qleft, qright);
-							RESULT=null;
-						}
-						
-					 }
-				
-					}
-					:}
+					{}
 				;
 xor_expression			::=	relation:p XOR relation:q
-					{:
-					if((p != null) && (q != null)){
-					
-					 ParserResult pr=(ParserResult)p;
-					 ParserResult qr=(ParserResult)q;
-					 if((pr.type != null) && (qr.type != null)){
-					 Type ptipo=(pr.type instanceof FunctionType)? (((FunctionType)pr.type).getRange()) : pr.type;
-					 Type qtipo=(qr.type instanceof FunctionType)? (((FunctionType)qr.type).getRange()) : qr.type;
-						if((ptipo instanceof BooleanType) && (qtipo instanceof BooleanType)){
-							//comparar los tipos!
-							//TODO: make the actual operation! (Have a function that does math operations...)
-							if(compare_types(ptipo,qtipo, qleft, qright))
-								RESULT=pr; //CHANGE THIS!
-							else 
-								RESULT= null;
-						}else{
-							//determine who's to blame:
-							if(ptipo instanceof BooleanType)
-							    agregarError("Se esperaba un tipo booleano y se encontró "+ptipo.toString(), pleft, pright);
-							else 
-							    agregarError("Se esperaba un tipo booleano y se encontró "+qtipo.toString(), qleft, qright);
-							RESULT=null;
-						}
-						
-					 }
-				
-					}
-					:}
+					{}
 				|	xor_expression:p XOR relation:q
-					{:
-					if((p != null) && (q != null)){
-					
-					 ParserResult pr=(ParserResult)p;
-					 ParserResult qr=(ParserResult)q;
-					 if((pr.type != null) && (qr.type != null)){
-					 Type ptipo=(pr.type instanceof FunctionType)? (((FunctionType)pr.type).getRange()) : pr.type;
-					 Type qtipo=(qr.type instanceof FunctionType)? (((FunctionType)qr.type).getRange()) : qr.type;
-						if((ptipo instanceof BooleanType) && (qtipo instanceof BooleanType)){
-							//comparar los tipos!
-							//TODO: make the actual operation! (Have a function that does math operations...)
-							if(compare_types(ptipo,qtipo, qleft, qright))
-								RESULT=pr; //CHANGE THIS!
-							else 
-								RESULT= null;
-						}else{
-							//determine who's to blame:
-							if(ptipo instanceof BooleanType)
-							    agregarError("Se esperaba un tipo booleano y se encontró "+ptipo.toString(), pleft, pright);
-							else 
-							    agregarError("Se esperaba un tipo booleano y se encontró "+qtipo.toString(), qleft, qright);
-							RESULT=null;
-						}
-						
-					 }
-				
-					}
-					:}
+					{}
 				;
-andthen_expression		::=	relation:p AND_THEN m:m relation:q {:
-					if((p != null) && (q != null)){
-					
-					 ParserResult pr=(ParserResult)p;
-					 ParserResult qr=(ParserResult)q;
-				 	 ParserResult mr=(ParserResult)m;
-					 if((pr.type != null) && (qr.type != null)){
-					 Type ptipo=(pr.type instanceof FunctionType)? (((FunctionType)pr.type).getRange()) : pr.type;
-					 Type qtipo=(qr.type instanceof FunctionType)? (((FunctionType)qr.type).getRange()) : qr.type;
-						if((ptipo instanceof BooleanType) && (qtipo instanceof BooleanType)){
-							//comparar los tipos!
-							//TODO: make the actual operation! (Have a function that does math operations...)
-							if(compare_types(ptipo,qtipo, qleft, qright)){
-								completa(pr.backpatch.verdadera, mr.value);
-								RESULT=new ParserResult(ptipo, 
-								new BackPatchResult(
-									qr.backpatch.verdadera,	
-									ListaSalto.fusiona(pr.backpatch.falsa, qr.backpatch.falsa)
-								));
-							}else{ 
-								RESULT= null;
-							}
-						}else{
-							//determine who's to blame:
-							if(qtipo instanceof BooleanType)
-							    agregarError("Se esperaba un tipo booleano y se encontró "+ptipo.toString(), pleft, pright);
-							else 
-							    agregarError("Se esperaba un tipo booleano y se encontró "+qtipo.toString(), qleft, qright);
-							RESULT=null;
-						}
-						
-					 }
-				
-					}
-
-					:}
+andthen_expression		::=	relation:p AND_THEN m:m relation:q {}
 				|	andthen_expression:p AND_THEN m:m relation:q
-					{:
-					if((p != null) && (q != null)){
-					
-					 ParserResult pr=(ParserResult)p;
-					 ParserResult qr=(ParserResult)q;
-					 ParserResult mr=(ParserResult)m;
-					 if((pr.type != null) && (qr.type != null)){
-					 Type ptipo=(pr.type instanceof FunctionType)? (((FunctionType)pr.type).getRange()) : pr.type;
-					 Type qtipo=(qr.type instanceof FunctionType)? (((FunctionType)qr.type).getRange()) : qr.type;
-						if((ptipo instanceof BooleanType) && (qtipo instanceof BooleanType)){
-							//comparar los tipos!
-							//TODO: make the actual operation! (Have a function that does math operations...)
-							if(compare_types(ptipo,qtipo, qleft, qright)){
-								completa(pr.backpatch.verdadera, mr.value);
-								RESULT=new ParserResult(ptipo, 
-								new BackPatchResult(
-									qr.backpatch.verdadera,	
-									ListaSalto.fusiona(pr.backpatch.falsa, qr.backpatch.falsa)
-								));
-							}else{ 
-								RESULT= null;
-							}
-						}else{
-							//determine who's to blame:
-							if(ptipo instanceof BooleanType)
-							    agregarError("Se esperaba un tipo booleano y se encontró "+ptipo.toString(), pleft, pright);
-							else 
-							    agregarError("Se esperaba un tipo booleano y se encontró "+qtipo.toString(), qleft, qright);
-							RESULT=null;
-						}
-						
-					 }
-				
-					}
-
-					:}
+					{}
 				;
 orelse_expression		::=	relation:p OR_ELSE m:m relation:q
-					{:
-					if((p != null) && (q != null)){
-					
-					 ParserResult pr=(ParserResult)p;
-					 ParserResult qr=(ParserResult)q;
-					 ParserResult mr=(ParserResult)m;
-					 if((pr.type != null) && (qr.type != null)){
-					 Type ptipo=(pr.type instanceof FunctionType)? (((FunctionType)pr.type).getRange()) : pr.type;
-					 Type qtipo=(qr.type instanceof FunctionType)? (((FunctionType)qr.type).getRange()) : qr.type;
-						if((ptipo instanceof BooleanType) && (qtipo instanceof BooleanType)){
-							//comparar los tipos!
-							//TODO: make the actual operation! (Have a function that does math operations...)
-							if(compare_types(ptipo,qtipo, qleft, qright)){
-								completa(pr.backpatch.falsa, mr.value);
-								RESULT=new ParserResult(ptipo, 
-								new BackPatchResult(
-									ListaSalto.fusiona(pr.backpatch.verdadera, qr.backpatch.verdadera),
-									qr.backpatch.falsa
-								));
-							}else{ 
-								RESULT= null;
-							}
-						}else{
-							//determine who's to blame:
-							if(qtipo instanceof BooleanType)
-							    agregarError("Se esperaba un tipo booleano y se encontró "+ptipo.toString(), pleft, pright);
-							else 
-							    agregarError("Se esperaba un tipo booleano y se encontró "+qtipo.toString(), qleft, qright);
-							RESULT=null;
-						}
-						
-					 }
-				
-					}
-						
-					:}
+					{}
 				|	orelse_expression:p OR_ELSE m:m relation:q
-					{:
-					if((p != null) && (q != null)){
-					
-					 ParserResult pr=(ParserResult)p;
-					 ParserResult qr=(ParserResult)q;
-					 ParserResult pm=(ParserResult)m;
-					 if((pr.type != null) && (qr.type != null)){
-					 Type ptipo=(pr.type instanceof FunctionType)? (((FunctionType)pr.type).getRange()) : pr.type;
-					 Type qtipo=(qr.type instanceof FunctionType)? (((FunctionType)qr.type).getRange()) : qr.type;
-						if((ptipo instanceof BooleanType) && (qtipo instanceof BooleanType)){
-							//comparar los tipos!
-							if(compare_types(ptipo,qtipo, qleft, qright)){
-								completa(pr.backpatch.falsa, pm.value);
-								RESULT=new ParserResult(ptipo, 
-								new BackPatchResult(
-									ListaSalto.fusiona(pr.backpatch.verdadera, qr.backpatch.verdadera),
-									qr.backpatch.falsa
-								));
-							}else{ 
-								RESULT= null;
-							}
-						}else{
-							//determine who's to blame:
-							if(ptipo instanceof BooleanType)
-							    agregarError("Se esperaba un tipo booleano y se encontró "+ptipo.toString(), pleft, pright);
-							else 
-							    agregarError("Se esperaba un tipo booleano y se encontró "+qtipo.toString(), qleft, qright);
-							RESULT=null;
-						}
-						
-					 }
-				
-					}
-
-					:}
-					
+					{}
 				;
-/**Acá cualquier cosa podría subir, pero sólo las boolean literals llevan su lista de backpatch y son BooleanType, así que otras
-no pasarían el filtro del chequeo de tipos*/
+
 relation			::=	simple_expression:s 
-					{:RESULT=s;:}
+					{}
 				|	simple_expression:p relational_operator:o simple_expression:q
-					{:
-					if((p != null) && (q != null)){
-					
-					 ParserResult pr=(ParserResult)p;
-					 ParserResult qr=(ParserResult)q;
-					 ParserResult po=(ParserResult)o;
-					 if((pr.type != null) && (qr.type != null)){
-					 //si no son null, vienen buenos:
-						BackPatchResult res=new BackPatchResult(new ListaSalto(cuadruplos.size()),
-											new ListaSalto(cuadruplos.size()+1));
-						gen(getIf(po.value), pr.value, qr.value, " ");
-						gen("goto", " ", "", "");
-						RESULT=new ParserResult(new BooleanType(), res);
-						}
-						
-					 }
-				
-
-					:}
+					{}
 				|	simple_expression:p membership_operator range:q
-					{:
-					if((p != null) && (q != null)){
-					
-					 ParserResult pr=(ParserResult)p;
-					 ParserResult qr=(ParserResult)q;
-					 if((pr.type != null) && (qr.type != null)){
-					 Type ptipo=(pr.type instanceof FunctionType)? (((FunctionType)pr.type).getRange()) : pr.type;
-					 Type qtipo=(qr.type instanceof FunctionType)? (((FunctionType)qr.type).getRange()) : qr.type;
-						if(ptipo.isNumeric() && qtipo.isNumeric()){
-							//comparar los tipos!
-							//TODO: make the actual operation! (Have a function that does math operations...)
-							if(compare_types(ptipo,qtipo, qleft, qright))
-								RESULT=pr; //CHANGE THIS!
-							else 
-								RESULT= null;
-						}else{
-							//determine who's to blame:
-							if(!ptipo.isNumeric())
-							    agregarError("Se esperaba un tipo numérico y se encontró "+ptipo.toString(), pleft, pright);
-							else 
-							    agregarError("Se esperaba un tipo numérico y se encontró "+qtipo.toString(), qleft, qright);
-							RESULT=null;
-						}
-						
-					 }
-				
-					}
-					
-					 :}
+					{}
 				|	simple_expression:p membership_operator subtype_indication:s
-					{:
-					  if(p != null){
-						ParserResult pr=(ParserResult)p;
-						ParserResult ps=(ParserResult)s;
-						if ((ps.type != null) && (pr.type != null)){
-						 	Type ptipo=(pr.type instanceof FunctionType)? (((FunctionType)pr.type).getRange()) : pr.type;
-							if(compare_types(ptipo, ps.type, sleft, sright)){
-								RESULT=pr;
-							}else{
-								RESULT=null;
-							}						
-						}
-					  }
-					:}
-
+					{}
 				;
 membership_operator		::=	IN
 				|	NOT IN
 				;
 simple_expression		::=	term_list:t
-					{:
-					if(t != null){					  
-					   ParserResult pr=(ParserResult)t;
-					   if(pr.type != null){
-						RESULT=pr;						
-					   }
-					}
-					:}
-		
+					{}
 				|	unary_operator:o term_list:t
-					{:
-					if(t != null){
-						ParserResult pt=(ParserResult)t;
-					if(pt.type != null){						
-					 Type ptipo=(pt.type instanceof FunctionType)? (((FunctionType)pt.type).getRange()) : pt.type;
-						ParserResult po=(ParserResult)o;
-						Type so=(Type)po.type;						
-						if(so.isNumeric()){
-							if(ptipo.isNumeric()){
-							    String lugar=temp_nuevo();
-							    gen(po.value, pt.value, "", lugar);
-							    RESULT=new ParserResult(lugar, ptipo);
-							}else{								
-							    agregarError("Se esperaba un tipo numérico y se encontró "+ptipo.toString(), oleft, oright);
-							    RESULT=null;
-							}	
-						}else{//the operator is boolean! (The 'NOT' operator)
-						/**Si la term_list es boolean, TIENE que traer su lista de backpatch*/
-							if(ptipo instanceof BooleanType){
-							    String lugar=temp_nuevo();
-							    gen(po.value, pt.value, "", lugar);	
-							    if(pt.backpatch != null){
-								RESULT=new ParserResult(lugar, ptipo, 
-									   new BackPatchResult(pt.backpatch.falsa, pt.backpatch.verdadera));
-							    }else{
-								RESULT=new ParserResult(lugar, ptipo);
-							    }
-							}else{
-							    agregarError("Se esperaba un tipo booleano y se encontró "+ptipo.toString(), oleft, oright);
-							    RESULT=null;
-							}
-						}						
-					}
-					}
-
-					:}	
+					{}	
 				;
 term_list			::=	term:t
-					{:
-					if(t != null){					  
-					   ParserResult pr=(ParserResult)t;
-					   if(pr.type != null){
-						RESULT=pr;						
-					   }
-					}
-					:}
+					{}
 				|	term_list:p adding_operator:o term:q
-					{:
-					if((p != null) && (q != null)){
-					
-					 ParserResult pr=(ParserResult)p;
-					 ParserResult qr=(ParserResult)q;
-					 ParserResult or=(ParserResult)o;
-					 if((pr.type != null) && (qr.type != null)){
-					 Type ptipo=(pr.type instanceof FunctionType)? (((FunctionType)pr.type).getRange()) : pr.type;
-					 Type qtipo=(qr.type instanceof FunctionType)? (((FunctionType)qr.type).getRange()) : qr.type;
-						if(ptipo.isNumeric() && qtipo.isNumeric()){
-							//comparar los tipos!
-							//TODO: make the actual operation! (Have a function that does math operations...)
-							if(compare_types(ptipo,qtipo, qleft, qright)){
-								String lugar=temp_nuevo();
-								gen(or.value, pr.value, qr.value, lugar);
-								RESULT=new ParserResult(lugar, ptipo);
-							}else {
-								RESULT= null;
-							}
-						}else{
-							//determine who's to blame:
-							if(!ptipo.isNumeric())
-							    agregarError("Se esperaba un tipo numérico y se encontró "+ptipo.toString(), pleft, pright);
-							else 
-							    agregarError("Se esperaba un tipo numérico y se encontró "+qtipo.toString(), qleft, qright);
-							RESULT=null;
-						}
-						
-					 }
-				
-					}
-					:}
+					{}
 				;
 term				::=	factor:f
-					{:
-					if(f != null){					  
-					   ParserResult pr=(ParserResult)f;
-					   if(pr.type != null){
-						RESULT=pr;						
-					   }
-					}
-					:}
+					{}
 				|	term:p multiplying_operator:o factor:q
-					{:
-					if ((p != null) && (q != null)){
-							
-					 ParserResult pr=(ParserResult)p;
-					 ParserResult qr=(ParserResult)q;
-					 ParserResult or=(ParserResult)o;
-					 if((pr.type != null) && (qr.type != null)){
-					 Type ptipo=(pr.type instanceof FunctionType)? (((FunctionType)pr.type).getRange()) : pr.type;
-					 Type qtipo=(qr.type instanceof FunctionType)? (((FunctionType)qr.type).getRange()) : qr.type;
-						if(ptipo.isNumeric() && qtipo.isNumeric()){
-							//comparar los tipos!
-							//TODO: make the actual operation! (Have a function that does math operations...)
-							if(compare_types(ptipo,qtipo, qleft, qright)){
-								String lugar=temp_nuevo();
-								gen(or.value, pr.value, qr.value, lugar);
-								RESULT=new ParserResult(lugar, ptipo);
-							}else{ 
-								RESULT= null;
-							}
-						}else{
-							//determine who's to blame:
-							if(!ptipo.isNumeric())
-							    agregarError("Se esperaba un tipo numérico y se encontró "+ptipo.toString(), pleft, pright);
-							else 
-							    agregarError("Se esperaba un tipo numérico y se encontró "+qtipo.toString(), qleft, qright);
-							RESULT=null;
-						}
-						
-					}	
-					}	
-					:}
+					{}
 				;
-/*These must be numeric: if they're not, pass a null up... Else, pass the parser result up*/
 factor				::=	primary:p
-					{:
-					   ParserResult pr=(ParserResult)p;
-					   if(pr.type != null){
-						RESULT=pr;						
-					   }
-					:}
+					{}
 				|	primary:p EXPONENTIATE primary:q
-					{:
-					 ParserResult pr=(ParserResult)p;
-					 ParserResult qr=(ParserResult)q;
-					 if((pr.type != null) && (qr.type != null)){
-					 Type ptipo=(pr.type instanceof FunctionType)? (((FunctionType)pr.type).getRange()) : pr.type;
-					 Type qtipo=(qr.type instanceof FunctionType)? (((FunctionType)qr.type).getRange()) : qr.type;
-						if(ptipo.isNumeric() && qtipo.isNumeric()){
-							//comparar los tipos!
-							//TODO: make the actual operation! (Have a function that does math operations...)
-							if(compare_types(ptipo,qtipo, qleft, qright)){
-								String lugar=temp_nuevo();
-								gen("**", pr.value, qr.value, lugar);
-								RESULT=new ParserResult(lugar, ptipo);
-							}
-							else {
-								RESULT= null;
-							}
-						}else{
-							//determine who's to blame:
-							if(!ptipo.isNumeric())
-							    agregarError("Se esperaba un tipo numérico y se encontró "+ptipo.toString(), pleft, pright);
-							else 
-							    agregarError("Se esperaba un tipo numérico y se encontró "+qtipo.toString(), qleft, qright);
-							RESULT=null;
-						}
-						
-					 }
-					:}
+					{}
 				;
-primary				::=	literal:l {:RESULT=l;:}
+primary				::=	literal:l {}
 				|	aggregate
 				|	name:n
-					{:ParserResult nr=(ParserResult)n;
-					  /***/
-					  if(!nr.clean){						
-						RESULT=new ParserResult(nr.place, nr.type);
-					  }else{
-					 	RESULT=n;
-					 }
-					:}
+					{}
 				|	allocator
 				|	qualified_expression
-				|	LEFTPAR expression:e RIGHTPAR {:RESULT=e;:}
+				|	LEFTPAR expression:e RIGHTPAR {}
 				;
-relational_operator		::=	EQUAL {:RESULT= new ParserResult("==");:}
-				|	INEQUALITY {:RESULT= new ParserResult("/=");:}
-				|	LT	{:RESULT= new ParserResult("<");:}
-				|	GT	{:RESULT= new ParserResult(">");:}
-				|	GTEQ{:RESULT= new ParserResult(">=");:}
-				|	LTEQ {:RESULT= new ParserResult("<=");:}
+relational_operator		::=	EQUAL {}
+				|	INEQUALITY {}
+				|	LT	{}
+				|	GT	{}
+				|	GTEQ{}
+				|	LTEQ {}
 				;
-adding_operator			::=	PLUS {:RESULT=new ParserResult("add");:}	
-				|	MINUS {:RESULT= new ParserResult("sub");:}
-				|	CONCATENATE {:RESULT= new ParserResult("&");:}
+adding_operator			::=	PLUS {}	
+				|	MINUS {}
+				|	CONCATENATE {}
 				;
-unary_operator			::=	PLUS:p {:RESULT=new ParserResult("+", new IntegerType());:}
-				|	MINUS:m {:RESULT=new ParserResult("neg", new IntegerType());:}
-				|	NOT:n	{:RESULT=new ParserResult("not", new BooleanType());:}
-				|	ABS:a	{:RESULT=new ParserResult("abs", new IntegerType());:}
+unary_operator			::=	PLUS:p {}
+				|	MINUS:m {}
+				|	NOT:n	{}
+				|	ABS:a	{}
 				;
-multiplying_operator		::=	MULTIPLY {:RESULT= new ParserResult("mul");:}
-				|	DIVIDE {:RESULT= new ParserResult("div");:}
-				|	MOD {:RESULT= new ParserResult("mod");:}
-				|	REM {:RESULT= new ParserResult("rem");:}
+multiplying_operator		::=	MULTIPLY {}
+				|	DIVIDE {}
+				|	MOD {}
+				|	REM {}
 				;
 qualified_expression		::=	name TICK LEFTPAR expression RIGHTPAR
 				|	name TICK aggregate
 				;
 allocator			::=	NEW name
 				;
-sequence_of_statements		::=	statement:s {:RESULT=s;:}
+sequence_of_statements		::=	statement:s {}
 				|	sequence_of_statements:q m:m statement:s
-					{:
-						ParserResult qr=(ParserResult)q;
-						ParserResult mr=(ParserResult)m;
-						ParserResult sr=(ParserResult)s;
-						completa(qr.backpatch.siguiente, mr.value);
-						RESULT=new ParserResult(
-							new BackPatchResult(sr.backpatch.siguiente)
-						);
-					:}
+					{}
 				;
-//usaremos pragma? De ser así, aquí también produciría pragma:
-statement			::=	label_list simple_statement:s {:RESULT=s;:}
-				|	label_list compound_statement:c {:RESULT=c;:}
+
+statement			::=	label_list simple_statement:s {}
+				|	label_list compound_statement:c {}
 				|	error 
 				;
-//de p85-persch, pag 92:
 label_list			::=	| label_list label
 				;
 simple_statement		::=	null_statement:n
-					{:RESULT=new ParserResult(new BackPatchResult(new ListaSalto()));:}
+					{}
 				|	assignment_statement:a
-					{:RESULT=new ParserResult(new BackPatchResult(new ListaSalto()));:}
+					{}
 				|	exit_statement:e
-					{:RESULT=e;:}
-				/*Al encontrar una sentencia de retorno, agregar la expresión. Si viene null es porque 
-				ya fue reportado un error antes. Idea: poner errorTypes en este caso. */
+					{}
 				|	return_statement:e 
-					{:
-					if(e != null){
-						ParserResult pe=(ParserResult)e;
-						returns.add(pe.type);
-					}else{
-						returns.add(new ErrorType());
-					}
-					RESULT=new ParserResult(new BackPatchResult(new ListaSalto()));
-					:}
+					{}
 				|	goto_statement:g
-					{:RESULT=new ParserResult(new BackPatchResult(new ListaSalto()));:}
+					{}
 				|	procedure_call:p
-					{:RESULT=new ParserResult(new BackPatchResult(new ListaSalto()));
-					  :}
+					{}
 				|	code_statement:c
-					{:RESULT=new ParserResult(new BackPatchResult(new ListaSalto()));:}
+					{}
 				;
-compound_statement		::=	if_statement:s {:parser.emptyLastUnclosed(); RESULT=s;
-					:}
+compound_statement		::=	if_statement:s {}
 				|	loop_statement:s 
-						{:parser.emptyLastUnclosed();
-						  RESULT=s;
-						  //completar el currentExit con la siguiente sentencia:
-						  if(currentExit != null){
-							completa(currentExit, cuadruplos.size());
-							currentExit=null;
-						  }
-						:}
-				|	block{:parser.emptyLastUnclosed();:}
+						{}
+				|	block{}
 				;
 label				::=	LEFTLABEL identifier RIGHTLABEL
 				;
 null_statement			::=	NULL SEMICOLON
 				;
-/*Revisar que la expression y el name coinciden*/
+
 assignment_statement		::=	name:n ASSIGNMENT expression:e SEMICOLON
-					{:
-					if(e != null){
-						ParserResult pe=(ParserResult)e;
-						ParserResult pn=(ParserResult)n;
-						//AdaSymbol gn=currentScope.get(pn.value);
-						
-						if(pn.type != null){
-						//get it:
-						AdaSymbol gn=currentScope.get(pn.value);
-						//if it is a function, a record or a constant, then it's not eligible:
-						if(gn.type instanceof FunctionType)
-						agregarError("El lado izquierdo de la asignación debe ser una variable, no una función", nleft, nright);
-						else if(gn.type instanceof RecordType)						
-						agregarError("El lado izquierdo de la asignación debe ser una variable, no un registro", nleft, nright);
-						else if(gn.constant)
-					agregarError("El lado izquierdo de la asignación debe ser una variable, no un objeto constante", nleft, nright);
-						else//si todo sale bien, entonces sí comparar:					
-						    if(compare_types(pn.type, pe.type, eleft, eright)){
-							//generar el código para la asignación:
-							generar_asignacion(pe, pn.value);
-						    }
-						}
-					}
-					
-					:}
+					{}
 				;
-/*Encontrar un if o un elsif significa encontrar una nueva branch*/
 if_header			::= 	IF:i condition:c THEN 
-					{:parser.setUnclosed("end if;", "if", ileft, iright);:}m:m sequence_of_statements:s 
-					{: branches++;
-					 if(c != null){
-						ParserResult pc=(ParserResult)c;
-						if(!(pc.type instanceof BooleanType)){
-							agregarError("Una condición debe ser de un tipo booleano y se encontró "+pc.type.toString(),
-							 cleft, cright);
-							RESULT=null;
-						}else{
-							ParserResult pm=(ParserResult)m;
-							ParserResult ps=(ParserResult)s;
-							RESULT=new ParserResult(pm.value,
-										 new BackPatchResult(ps.backpatch.siguiente,
-		 	       										 pc.backpatch.verdadera,
-													 pc.backpatch.falsa));
-						}
-					}:}
+					{}m:m sequence_of_statements:s 
+					{}
 				;
 if_statement			::=	if_header:header	
 						else_option:els 
 					END IF SEMICOLON 
-					{:
-					if(header != null){
-						ParserResult pc=(ParserResult)header;
-						ParserResult RetVal=new ParserResult();
-						completa(pc.backpatch.verdadera, pc.value);
-						RetVal.backpatch.siguiente=ListaSalto.fusiona(pc.backpatch.siguiente, pc.backpatch.falsa);
-						if(els != null){
-							ParserResult pelse=(ParserResult)els;
-							completa(pc.backpatch.falsa, pelse.value);
-							RetVal.backpatch.siguiente=ListaSalto.fusiona(pc.backpatch.siguiente,
-									           pelse.backpatch.siguiente);
-						}
-						RESULT=RetVal;
-					 }else{
-						RESULT=new ParserResult(new BackPatchResult());
-					 }
-					:}
+					{}
 				|	if_header:header
 						n:n m:mdos  elsif_list:elsif
 						else_option:els
 					END IF SEMICOLON
-					{:
-					 if(header != null){ 
-							ParserResult pc=(ParserResult)header;
-							ParserResult pm2=(ParserResult)mdos;
-							ParserResult pn=(ParserResult)n;
-							ParserResult pelsif=(ParserResult)elsif;
-							ParserResult pelse=(ParserResult)els;
-							BackPatchResult siguiente=new BackPatchResult();
-							completa(pc.backpatch.verdadera, pc.value);
-							completa(pc.backpatch.falsa, pm2.value);
-							siguiente.siguiente=ListaSalto.fusiona(
-											ListaSalto.fusiona(pc.backpatch.siguiente,pn.backpatch.siguiente),
-											pelsif.backpatch.siguiente
-										);	
-							if(pelse != null){
-								completa(pelsif.backpatch.falsa, pelse.value);
-								siguiente.siguiente=ListaSalto.fusiona(siguiente.siguiente, pelse.backpatch.siguiente);
-							}else{
-								siguiente.siguiente=ListaSalto.fusiona(siguiente.siguiente, pelsif.backpatch.falsa);
-							}
-							RESULT=new ParserResult(siguiente);
-						}else{
-							RESULT=new ParserResult(new BackPatchResult());
-						}
-					:} 
+					{} 
 				;
 
 elsif_list			::=	ELSIF condition:c THEN m:m sequence_of_statements:s
-					{:
-						branches++;
-						//comprobación:
-						if(c != null){
-							ParserResult pc=(ParserResult)c;
-							ParserResult pm=(ParserResult)m;
-							ParserResult ps=(ParserResult)s;
-							if(!(pc.type instanceof BooleanType)){
-								agregarError("Una condición debe ser de un tipo booleano y se encontró "+pc.type.toString(),
-							        cleft, cright);
-							}else{
-						//backpatching:
-							completa(pc.backpatch.verdadera, pm.value);			
-							RESULT=new ParserResult(
-							 new BackPatchResult(
-								ps.backpatch.siguiente,
-								new ListaSalto(),
-								pc.backpatch.falsa
-							 )
-							);
-							}
-						}
-					:}
+					{}
 				
 					| elsif_list:elsif n:n ELSIF m:muno condition:c THEN m:mdos sequence_of_statements:s
-					 {: branches++;
-					  if(c != null){
-						ParserResult pc=(ParserResult)c;
-						ParserResult ps=(ParserResult)s;					
-						ParserResult pn=(ParserResult)n;
-						ParserResult pm1=(ParserResult)muno;
-						ParserResult pm2=(ParserResult)mdos;
-						ParserResult pelsif=(ParserResult)elsif;
+					 {} 
+				;
 
-						if(!(pc.type instanceof BooleanType)){
-							agregarError("Una condición debe ser de un tipo booleano y se encontró "+pc.type.toString(),
-						        cleft, cright);
-						}else{
-							completa(pc.backpatch.verdadera, pm2.value);
-							completa(pelsif.backpatch.falsa, pm1.value);
-							RESULT=new ParserResult(
-								new BackPatchResult(
-									ListaSalto.fusiona(pn.backpatch.siguiente,
-										ListaSalto.fusiona(ps.backpatch.siguiente, pelsif.backpatch.siguiente)
-									),
-									new ListaSalto(),
-									pc.backpatch.falsa
-								)
-							);
-						}
-					 }
-					
-					:} 
-				;
-/*Se asume que toda sentencia (y toda lista de sentencias) retorna su listaSiguiente*/
 else_option			::=	| n:n ELSE m:m sequence_of_statements:s
-				{:ParserResult ps=(ParserResult)s;
-				  ParserResult mr=(ParserResult)m;
-				  ParserResult nr=(ParserResult)n;
-				  ps.backpatch.siguiente=ListaSalto.fusiona(ps.backpatch.siguiente, nr.backpatch.siguiente);
-				  RESULT=new ParserResult(mr.value, ps.backpatch);
-				:}
+				{}
 				;
-condition			::=	expression:e {:RESULT=e;:}
+condition			::=	expression:e {}
 				;
-//acá iría el bloque case, seguido de la alternative_list
+//Bloque case, seguido de la alternative_list
 loop_statement			::=	iteration_clause_option:o
 					 m:m basic_loop:s SEMICOLON
-					{:
-					 //se asume que si la iteration_clause existe, se creó una st para ésta
-					 if(o != null && (((ParserResult)o).value instanceof ArrayList))
-						currentScope=currentScope.getAncestor(); 
-					:}
+					{}
 					placeholder
-					{:/*la iteration clause ya trae las cosas de la condición Y el marcador antes de ésta*/
-						ParserResult mr=(ParserResult)m;
-						ParserResult sr=(ParserResult)s;
-						ListaSalto siguiente;
-						if(o != null){
-							ParserResult iteration=(ParserResult)o;
-							completa(iteration.backpatch.verdadera, mr.value);						
-							if(iteration.value instanceof ArrayList){
-								ArrayList<Object> post=(ArrayList)iteration.value;
-								completa(sr.backpatch.siguiente, cuadruplos.size());
-								Cuadruplo step=(Cuadruplo)post.get(1);
-								gen(step.operador, step.arg1, step.arg2, step.res);
-								//genera un goto adonde está la condición:
-								gen("goto", "", "", post.get(0));
-							}else{//no es una lista, si no un simple m
-								completa(sr.backpatch.siguiente, iteration.value);	
-								gen("goto","", "", iteration.value);
-							}
-							/*Completar la sequence_of_staments que podría traer las listas de los exit_staments
-							  Verdadera: si se cumple será la siguiente (porque sale)
-							  Falsa: completarla con la condición */
-							//completa(sr.backpatch.falsa, iteration.value);
-							//siguiente=ListaSalto.fusiona(iteration.backpatch.falsa, sr.backpatch.verdadera);
-							siguiente=iteration.backpatch.falsa;
-						}else{//es un loop normal, sin iteración.
-							completa(sr.backpatch.siguiente, mr.value);
-							gen("goto", "", "", mr.value);
-							//siguiente=sr.backpatch.verdadera;
-							siguiente=new ListaSalto();
-						}
-						RESULT=new ParserResult(
-							new BackPatchResult(siguiente)
-						);
-					:}
+					{}
 				|	identifier:i COLON iteration_clause_option:o
 					m:m basic_loop:s identifier:j SEMICOLON
-					{:
-					String si=(String)i; 
-					String sj=(String)j;
-					if(!si.equalsIgnoreCase(sj))
-						agregarError("Se esperaba 'end loop "+si+"' y se encontró 'end loop "+sj+"'", jleft, jright);
-					ParserResult mr=(ParserResult)m;
-					ParserResult sr=(ParserResult)s;						
-					if(o != null && (((ParserResult)o).value instanceof ArrayList)){
-						currentScope=currentScope.getAncestor(); 
-					  
-					/*la iteration clause ya trae las cosas de la condición Y el marcador antes de ésta*/
-						ParserResult iteration=(ParserResult)o;
-						completa(iteration.backpatch.verdadera, mr.value);
-						/*Aquí hay una disyuntiva, o viene una lista o no, si viene
-						una, es porque es un for y hay que generarlo*/
-						if(iteration.value instanceof ArrayList){
-							ArrayList<Object> post=(ArrayList)iteration.value;
-							completa(sr.backpatch.siguiente, cuadruplos.size());
-							Cuadruplo step=(Cuadruplo)post.get(1);
-							gen(step.operador, step.arg1, step.arg2, step.res);
-							//genera un goto adonde está la condición:
-							gen("goto", "", "", post.get(0));
-						}else{//no es una lista, si no un simple m
-							completa(sr.backpatch.siguiente, iteration.value);	
-							gen("goto", "", "", iteration.value);
-						}
-						//TODO: cambiar esto para revisar que el value de la e_stmnt sea una etiqueta de este loop.
-						//completa(sr.backpatch.falsa, iteration.value);
-						RESULT=new ParserResult(
-							new BackPatchResult(iteration.backpatch.falsa)
-						);				
-					}else{
-						completa(sr.backpatch.siguiente, mr.value);
-						gen("goto", "", "", mr.value);
-						//siguiente=sr.backpatch.verdadera;
-						RESULT=new ParserResult(new BackPatchResult(new ListaSalto()));
-						
-					}
-					:}	
+					{}	
 				;
 basic_loop			::=	LOOP:l
-					{:parser.setUnclosed("end loop;", "loop",lleft,lright);
-					  currentExit=null;
-					 :}
+					{}
 						sequence_of_statements:s 
 					END LOOP
-					{:RESULT=s;:}  
+					{}  
 				;
-//de p85-persch, pag 93
-/*Validar que no exista el id, crear un nuevo scope.*/
+
 iteration_clause_option		::=
 				|	FOR identifier:i IN discrete_range:r m:m
-					{:
-					LinkedSymbolTable scope=new LinkedSymbolTable(currentScope); 
-					currentScope.addChild(scope);
-					currentScope=scope;
-					//ver si viene algo en el rango:
-					Type tipo=(r != null) ? ((ParserResult)r).type : new IntegerType();
-					if(!currentScope.put(i, new AdaSymbol(tipo, true))){
-						agregarError("'"+((String)i)+"' ya ha sido declarado.", ileft, iright);					
-					}
-					/*
-					//avisar si el rango es nulo:
-					if(r ==  null)
-						agregarError("Advertencia: El rango del ciclo es nulo y no se ejecutará", rleft, rright);
-					*/
-					if(r != null){
-						ParserResult range=(ParserResult)r;
-						Object initial = ((ArrayList<Object>)range.value).get(0);
-						Object fin     = ((ArrayList<Object>)range.value).get(1);
-						//acá podríamos avisar que el rango es nulo
-						// identifier := range_initial
-						gen(":=", initial, "", i);	
-						//las listas verdadera y falsa:
-						BackPatchResult b_res=new BackPatchResult(new ListaSalto(cuadruplos.size()),
-                                                                                          new ListaSalto(cuadruplos.size()+1));
-						//generar las instrucciones:
-						ArrayList<Object> post=new ArrayList<Object>(2);
-						post.add(new Integer(cuadruplos.size()));
-						gen("if_<", i, fin, "");
-						gen("goto", " ", "", "");
-						ParserResult mr=(ParserResult)m;
-						//post.add(mr.value);
-						post.add(new Cuadruplo("add", i.toString(), "1", i.toString()));
-						RESULT=new ParserResult(post, b_res);
-						
-					}
-					:}
+					{}
 				|	FOR identifier:i IN REVERSE discrete_range:r m:m
-					{:
-					LinkedSymbolTable scope=new LinkedSymbolTable(currentScope); 
-					currentScope.addChild(scope);
-					currentScope=scope;
-					Type tipo=(r != null) ? ((ParserResult)r).type : new IntegerType();
-					if(!currentScope.put(i, new AdaSymbol(tipo, true))){
-						agregarError("'"+((String)i)+"' ya ha sido declarado.", ileft, iright);
-					}
-					//generar la condición:
-					if(r != null){
-						ParserResult range=(ParserResult)r;
-						Object initial = ((ArrayList<Object>)range.value).get(0);
-						Object fin     = ((ArrayList<Object>)range.value).get(1);
-						//acá podríamos avisar que el rango es nulo
-						// identifier := range_initial
-						gen(":=", fin, "", i);	
-						//las listas verdadera y falsa:
-						BackPatchResult b_res=new BackPatchResult(new ListaSalto(cuadruplos.size()),
-                                                                                          new ListaSalto(cuadruplos.size()+1));
-						//generarlas instrucciones:
-						ArrayList<Object> post=new ArrayList<Object>(2);
-						post.add(new Integer(cuadruplos.size()));
-						gen("if_>=", i, initial, "");
-						gen("goto", " ", "", "");
-						ParserResult mr=(ParserResult)m;
-						post.add(new Cuadruplo("sub", i.toString(), "1", i.toString()));
-						RESULT=new ParserResult(post, b_res);
-					}	
-					:}
+					{}
 				|	WHILE m:m condition:c 
-					 {: if(c != null){
-						ParserResult pc=(ParserResult)c;
-						if(!(pc.type instanceof BooleanType)){
-							agregarError("Se esperaba un tipo booleano y se encontró"+pc.type.toString(), cleft, cright);
-						}else{
-							//subir la lista verdadera de la condición para que la llene el loop y el valor
-							// de m para completar lo de las sentencias y generar el goto
-							ParserResult res=new ParserResult();
-							ParserResult mr=(ParserResult)m;
-							res.value=mr.value;
-							res.backpatch.falsa=pc.backpatch.falsa;
-							res.backpatch.verdadera=pc.backpatch.verdadera;
-							RESULT=res;
-						}
-					 }:} 
+					 {} 
 				;
 block				::=	declare_part_option BEGIN:b 
-					{:parser.setUnclosed("end;", "begin del bloque",bleft, bright);:}
+					{}
 						sequence_of_statements 
 					END SEMICOLON  
 				|	identifier:i  COLON declare_part_option
 						 BEGIN 
-						 {:parser.setUnclosed((" end "+((String)i)+ ";"), ("begin del bloque "+((String)i)),ileft, iright);:}	
+						 {}	
 							sequence_of_statements 
 						 END identifier SEMICOLON  
 				;
 declare_part_option		::=	
 				|	 DECLARE declarative_part
 				;
-/*Para labels: revisar que la label exista*/
+
 exit_statement			::=	EXIT name_option:n when_option:w SEMICOLON
-					{:if(w != null){
-						  ParserResult wr=(ParserResult)w;
-						  completa(wr.backpatch.falsa, cuadruplos.size());
-						  if(currentExit != null){
-							currentExit=ListaSalto.fusiona(currentExit, wr.backpatch.verdadera);
-						  }else{
-							currentExit=wr.backpatch.verdadera;
-						  }
-						  if(n != null){
-							  ParserResult nr=(ParserResult)n;		
-							  RESULT=new ParserResult(nr.value, wr.type, wr.backpatch);
-						  }else{
-							  RESULT=new ParserResult(wr.type, wr.backpatch);
-						  }
-					  }else{//there is no condition, but a goto must be generated:
-					  ListaSalto verdadero=new ListaSalto(cuadruplos.size());
-					  BackPatchResult bpr=new BackPatchResult(verdadero, new ListaSalto()); 
-					  gen("goto", "", "", " ");
-      						if(n != null){
-							ParserResult nr=(ParserResult)n;		
-							RESULT=new ParserResult(nr.value, bpr); 
-						}else{
-							RESULT=new ParserResult(bpr);
-						}
-					  if(currentExit != null){
-						currentExit=ListaSalto.fusiona(currentExit, verdadero);
-					  }else{
-						currentExit=verdadero;
-					  }
-					  }
-					:}
+					{}
 				;
-name_option			::=	| name:n {:RESULT=n;:}
+name_option			::=	| name:n {}
 				;
 when_option			::=	| WHEN m:m condition:c 
-					 {: if(c != null){
-						ParserResult pc=(ParserResult)c;
-						if(!(pc.type instanceof BooleanType)){
-							agregarError("Se esperaba un tipo booleano y se encontró"+pc.type.toString(), cleft, cright);
-						}else{
-							ParserResult res=new ParserResult();
-							ParserResult mr=(ParserResult)m;
-							res.value=mr.value;
-							res.backpatch.falsa=pc.backpatch.falsa;
-							res.backpatch.verdadera=pc.backpatch.verdadera;
-							RESULT=res;
-
-						}
-					 }:} 
+					 {} 
 				;
 return_statement		::=	RETURN SEMICOLON
-					{:
-						gen("return", "", "", "");
-					:}
+					{}
 				|	RETURN expression:e SEMICOLON 
-					{:
-						ParserResult pe=(ParserResult)e;
-						gen("return", pe.value, "", "");
-						//gen("goto", "", "", "exit_"+currentScope.id);
-						RESULT=e;
-					:}
+					{}
 				;
 goto_statement			::=	GOTO name SEMICOLON 
 				;
-//no vamos a usar generics, o sí? En este caso, acá faltarían dos producciones
+
 subprogram_declaration		::=	subprogram_specification SEMICOLON
 				;	 
-/*Esta es una de las cosas que cambiaría de usar tablas de símbolos en las funciones. Por ahora asumiré que las formal_part
-devuelven una lista de tipos, ya que sólo me importan los tipos...*/	
 subprogram_specification	::=	PROCEDURE identifier:i formal_part_option:f
-					{:
-						if(f != null){
-							ArrayList<ParserResult> fl=(ArrayList<ParserResult>)f;
-							ArrayList<Type> ft=new ArrayList<Type>();
-							for (ParserResult p:fl)
-								ft.add(p.type);
-							if(!currentScope.put(i, new AdaSymbol(new FunctionType(ft))))
-								agregarError("'"+((String)i)+"' ya ha sido declarado.", ileft, iright);
-						}
-					:}
+					{}
 				|	FUNCTION designator:d formal_part_option:f RETURN subtype_indication:s
-					{:
-						ParserResult ps=(ParserResult)s;
-						if(f != null){//si la formal part está correcta:
-							/*Si los nombres de los parámetros me importaran: */
-							//ArrayList<ParserResult> pf=(ArrayList<ParserResult>)f;
-							//sólo me importan los types?
-							//LinkedSymbolTable ft=(LinkedSymbolTable)f;	 
-							ArrayList<ParserResult> fl=(ArrayList<ParserResult>)f;
-							ArrayList<Type> ft=new ArrayList<Type>();
-							for (ParserResult p:fl)
-								ft.add(p.type);							
-							if(ps.type != null){
-								if(!currentScope.put(d, new AdaSymbol(new FunctionType(ps.type, ft))))
-									agregarError("'"+((String)d)+"' ya ha sido declarado.", dleft, dright);
-							}
-						}
-					:}
+					{}
 				;
 subprogram_specification_is	::=	PROCEDURE identifier:i IS 
-					{:
-					String id=i.toString().toLowerCase();
-                                         if(currentScope != null){
-                                                if(!currentScope.put(i, new AdaSymbol(new FunctionType()))){
-                                                        agregarError("'"+((String)i)+"' ya ha sido declarado.", ileft, iright);
-                                                }else{
-							LinkedSymbolTable scope=new LinkedSymbolTable(currentScope, id);
-							currentScope.addChild(scope);
-							currentScope=scope;
-							gen("function", id, "", "");
-						}
-
-                                         }else{
-                                          currentScope=new LinkedSymbolTable(id);
-                                          boolean neverused=currentScope.put("put", new AdaSymbol(new FunctionType()));
-                                          boolean neveruser2=currentScope.put("get", new AdaSymbol(new FunctionType()));
-					  gen("glbl", currentScope.getFlatId(), "", ""); //glbl genera las cosas iniciales. Pero todas las vars van en regs...
-                                         }
-
-                                          RESULT=i;
-                                        :}
-	
+					{}
 				|	PROCEDURE identifier:i formal_part:f IS 
-					{:
-					  String id=i.toString().toLowerCase();
-					  //formal part es una lista de parser results:
-					  if( f!= null){											  	
-						ArrayList<ParserResult> fl=(ArrayList<ParserResult>)f;
-						ArrayList<Type> ft=new ArrayList<Type>();
-						for (ParserResult p:fl)
-							ft.add(p.type);
-						
-						if((currentScope != null) && !currentScope.put(i, new AdaSymbol(new FunctionType(ft)))){
-							agregarError("'"+((String)i)+"' ya ha sido declarado.", ileft, iright);
-						}else{
-							if(currentScope != null){
-								LinkedSymbolTable scope=new LinkedSymbolTable(currentScope, id);
-								currentScope.addChild(scope);
-								currentScope=scope;
-								gen("function", id, "", "");
-							}else{
-								currentScope=new LinkedSymbolTable(id);
-								gen("glbl", currentScope.getFlatId(), "", "");
-							}
-							String nombre="";
-							boolean cons=false;
-							int paramCount=0;
-							AdaSymbol sym=null;
-							for(ParserResult p: fl){
-								nombre=((String)p.value).split("\\$")[0];
-								cons=((String)p.value).contains("$constant");
-								if(paramCount <= 3){
-									sym=new AdaSymbol(p.type,
-											 cons, String.format("$a%d", paramCount));
-								}else{
-									sym=new AdaSymbol(p.type, cons);
-								}
-								if(!currentScope.put(nombre, sym)){
-									agregarError("'"+nombre+"' ya ha sido declarado", fleft, fright);
-								}else{paramCount++;}
-									
-								
-							}
-						}
-					    
-					  }
-					
-					RESULT=i;:}
+					{}
 				|	FUNCTION designator:i formal_part_option:f RETURN subtype_indication:s IS 
-					{:
-					String id=i.toString().toLowerCase();
-					//es una función, así que al menos espera una branch:
-					branches=1;
-					ParserResult ps=(ParserResult)s;
-					if(ps.type != null){
-					if(f != null){
-						
-						ArrayList<ParserResult> fl=(ArrayList<ParserResult>)f;
-						ArrayList<Type> ft=new ArrayList<Type>();
-						for (ParserResult p:fl)
-							ft.add(p.type);							
-						if(ps.type != null){
-							if((currentScope != null) && !currentScope.put(i, new AdaSymbol(new FunctionType(ps.type, ft)))){
-								agregarError("'"+((String)i)+"' ya ha sido declarado.", ileft, iright);
-							}else{
-								if(currentScope != null){
-									LinkedSymbolTable scope=new LinkedSymbolTable(currentScope, id);
-									currentScope.addChild(scope);
-									currentScope=scope;		
-									gen("function", id, "", "");	
-								}else{
-									currentScope=new LinkedSymbolTable(id);
-									gen("glbl", currentScope.getFlatId(), "", "");
-								}
-								String nombre="";
-								boolean cons=false;
-								int paramCount=0;
-								AdaSymbol sym=null;
-								for(ParserResult p: fl){
-									nombre=((String)p.value).split("\\$")[0];
-									cons=((String)p.value).contains("$constant");
-									//las funciones sólo pueden tener parámetros de tipo in:
-									if(!cons){
-										agregarError("Las funciones sólo pueden tener parámetros de modo in",
-										fleft, fright );
-										cons=true;
-									}
-									if(paramCount <= 3){
-										sym=new AdaSymbol(p.type,
-												 cons, String.format("$a%d", paramCount));
-									}else{
-										sym=new AdaSymbol(p.type, cons);
-									}
-									if(!currentScope.put(nombre, sym)){
-										agregarError("'"+nombre+"' ya ha sido declarado", fleft, fright);
-									}else{paramCount++;}
-								}
-							}
-						}
-						
-					}else{
-						if((currentScope != null) && !currentScope.put(i, new AdaSymbol(new FunctionType(ps.type))))
-							agregarError("'"+((String)i)+"' ya ha sido declarado.", ileft, iright);
-						else{	
-							if(currentScope != null){
-								LinkedSymbolTable scope=new LinkedSymbolTable(currentScope, id);
-								currentScope.addChild(scope);
-								currentScope=scope;		
-								gen("function", id, "", "");	
-							}else{
-								currentScope=new LinkedSymbolTable(id);
-								gen("glbl", currentScope.getFlatId(), "", "");
-							}
-						}
-						
-					}
-					
- 					RESULT=new ParserResult(i,ps.type);
-					}else{
-					 RESULT=i;
-					}
-					:}
+					{}
 				;
-//de p85-persch, pag 94
-designator			::=	identifier:i {:RESULT=i;:} 
-				|	operator_symbol:o {:RESULT=o;:}
+
+designator			::=	identifier:i {} 
+				|	operator_symbol:o {}
 				;
 operator_symbol			::=	STRING_LITERAL:s 
-					{:RESULT=new ParserResult(String.format("\"%s\"", s),
-					  new StringType(((String)s).length()));:}
+					{}
 				;
-formal_part			::=	LEFTPAR parameter_declaration_list:l {:RESULT=l;:} RIGHTPAR
+formal_part			::=	LEFTPAR parameter_declaration_list:l {} RIGHTPAR
 				;
-formal_part_option		::=	| formal_part:f {:RESULT=f;:}
+formal_part_option		::=	| formal_part:f {}
 				;
-parameter_declaration_list	::=	parameter_declaration:d {:
-					if(d != null){
-						ArrayList<ParserResult> r=new ArrayList<ParserResult>();
-					if (!(d instanceof ArrayList)){
-						//asumimos que, si no es una lista, es un parser result
-						r.add((ParserResult)d);
-						RESULT=r;
-					}else{
-						r.addAll((ArrayList<ParserResult>)d);
-						RESULT=r;
-					}
-					}
-					:}
+parameter_declaration_list	::=	parameter_declaration:d {}
 				|	parameter_declaration_list:l SEMICOLON parameter_declaration:d
-					{:
-					if(l != null){
-						ArrayList<ParserResult> ll=(ArrayList<ParserResult>)l;
-						//puede venir un solo elemento o una lista:
-						if(d != null){
-							if(!(d instanceof ArrayList)){
-								ll.add((ParserResult)d);
-							}else{
-								ll.addAll((ArrayList<ParserResult>)d);
-							}
-						}
-						RESULT=ll;
-					}
-					:}
+					{}
 				;
 parameter_declaration		::=	identifier:i COLON mode:m subtype_indication:s initialization_option:o
-					{:
-					ParserResult ps=(ParserResult)s;
-					String mode=(String)m;
-                                	//if the type is null, there was an error down the tree (and is already reported)
-	                                if (ps.type != null){
-						if(((String)ps.value).equalsIgnoreCase(ps.type.name)){
-							String nombre=(mode.equalsIgnoreCase("in")) ? ((String)i)+"$constant" : (String)i;
-							if(o != null){
-								ParserResult po=(ParserResult)o;
-								if(mode.equalsIgnoreCase("in")){
-									if(compare_types(ps.type, po.type, oleft, oright)){
-										//todo está bien, generar el código
-										generar_asignacion(po, i);
-									}
-								}else{//solo los in pueden estar inicializados:
-									agregarError("El parámetro '"+i.toString()+"' no es de tipo 'in'"+
-									", no puede ser inicializado", oleft, oright);
-								}
-								//Type tipo=compare ? ps.type : new ErrorType(ps.type);
-								Type tipo=ps.type;
-								ParserResult r=new ParserResult(nombre, tipo);
-								RESULT=r;
-							}else{//there's no initialization expression:
-								RESULT=new ParserResult(nombre, ps.type);
-							}
-						}else{
-							RESULT=new ParserResult(i);
-							agregarError("'"+((String)ps.value)+"' no ha sido declarado como subtipo", sleft, sright);							     }
-                	                }else{
-						RESULT=null;
-					}
-					:}
+					{}
 				|	identifier_list:l COLON mode:m subtype_indication:s initialization_option:o
-					{:
-					
-					ParserResult ps=(ParserResult)s;
-                                	//if the type is null, there was an error down the tree (and is already reported)
-	                                if (ps.type != null){
-					ArrayList<String> il=(ArrayList<String>)l;
-					ArrayList<ParserResult> r=new ArrayList<ParserResult>();
-						if(((String)ps.value).equalsIgnoreCase(ps.type.name)){
-							String nombre="";
-							String mode=(String)m;
-							if(o != null){
-								ParserResult po=(ParserResult)o;
-								boolean compare;
-								if(!mode.equalsIgnoreCase("in")){
-									agregarError("Los parámetros '"+il.toString()+"' no son de tipo 'in'"+
-									", no pueden ser inicializados", oleft, oright);
-									compare=false;	
-								}else{
-									compare=compare_types(ps.type, po.type, oleft, oright);
-								}
-								//Type tipo=compare ? ps.type : new ErrorType(ps.type);
-								Type tipo=ps.type;
-								for(String id :il){									
-									nombre=(mode.equalsIgnoreCase("in")) ? id+"$constant" : id;
-									if(compare){
-										generar_asignacion(po, id);
-									}
-									r.add(new ParserResult(nombre, tipo));
-								}
-								RESULT=r;
-							}else{//there's no initialization expression:
-								for(String id: il){
-									nombre=(mode.equalsIgnoreCase("in")) ? id+"$constant" : id;
-									r.add(new ParserResult(nombre, ps.type));
-								}
-								RESULT=r;
-							}
-						}else{
-							for(String id: il)
-								r.add(new ParserResult(id));
-							RESULT=r;
-							agregarError("'"+((String)ps.value)+"' no ha sido declarado como subtipo", sleft, sright);
-						}
-                	                }else{
-						RESULT=null;
-					}
-					:}
+					{}
 				;
-mode				::=	{:RESULT="IN";:} //el modo por defecto es in
-				|	IN {:RESULT="IN";:}
-				|	OUT {:RESULT="OUT";:}
-				|	IN OUT {:RESULT="INOUT";:}
+mode				::=	{} 
+				|	IN {}
+				|	OUT {}
+				|	IN OUT {}
 				;
 subprogram_body			::=	subprogram_specification_is:s 
 						declarative_part 
 					BEGIN:b  
-					{:Object designator=(s instanceof ParserResult) ? ((ParserResult)s).value : s;
-					parser.setUnclosed((" end "+((String)designator)+";"), "begin",bleft, bright);
-					//crear el código para inicializar la función
-					gen("initFunction", currentScope.getFlatId(),
-					 String.valueOf(currentScope.desplazamiento), "");
-					:}
+					{}
 						sequence_of_statements:t
 					END designator_option:e SEMICOLON
-					//salir del subprograma:
-					{:
-					  if(s != null){
-						if(s instanceof ParserResult){
-							ParserResult ps=(ParserResult)s;
-							for(Type r : returns){
-								//si es errortype, ya fue reportado un error
-								if(!(r instanceof ErrorType))
-									compare_types(ps.type,r,sleft, sright);
-							}
-
-							//se asume que sólo las funciones tienen branches
-							if (returns.size() < branches)
-								agregarError("Sentencia de retorno faltante para el subprograma '"+((String)ps.value)+"'"
-								, sleft, sright);
-						}else{//si no es un ParserResult es un procedure:
-							if(returns.size()>0)	
-								agregarError("Un procedimiento no puede retornar un valor"+
-								" (En el procedimiento '"+((String)s)+"') ", sleft, sright);
-						}
-					  }
-					  //completar la sequence of statements: así todas tienen un salto
-					  ParserResult tr=(ParserResult)t;
-					  completa(tr.backpatch.siguiente, cuadruplos.size());
-					//generar la salida:
-					Object designator=(s instanceof ParserResult) ? ((ParserResult)s).value : s;
-					String id=designator.toString();
-					if(currentScope.getAncestor() == null)
-						gen("glblExit", currentScope.getFlatId(), "", "");
-					else
-						gen("exit",currentScope.getFlatId(), "", "");
-					  //resetear las cosas: el main no debería desaparecer!
-					if(currentScope.getAncestor() != null)
-						  currentScope=currentScope.getAncestor();
-					  returns=new ArrayList<Type>();
-					  branches=0;
-				  	 //Revisar que no venga un exit_statement
-					  if(currentExit != null )	
-						  agregarError("No puede salir de un subprograma con una sentencia de salida", sleft, sright);
-					:} placeholder 
-					{:Object designator=(s instanceof ParserResult) ? ((ParserResult)s).value : s;
-					check_coherence(designator,sleft, sright, e, eleft, eright);:}
+					{} placeholder 
+					{}
 				;
 designator_option		::=	| designator:d {:RESULT=d;:}
 				;
-//estas parecen estar incompletas: cf scc 6.4 (pag 149 del pdf) del ADA-RM
-/*N.B todas, excepto las primeras, producciones de procedure y function call las agregué yo, no salen en p85-persch
-* y así pasó con actual_parameter_part, parameter_association_list, parameter_association, formal_parameter_option
-* y explicit_actual_parameter
-*/
+
 procedure_call			::=	name:n SEMICOLON 
-					{:
-					/*si no está clean, alguien ya se hizo cargo de ella:
-					entonces, sólo hacer la llamada si aún no ha pasado por function_call
-					*/
-					ParserResult pn=(ParserResult)n;
-					AdaSymbol f=findSymbol(pn.value, nleft, nright);
-					if(f != null){
-						if(pn.clean){
-						//Se tiene que haber declarado como función
-							if(!(f.type instanceof FunctionType)){
-								agregarError("'"+((String)pn.value)+"' no es un procedimiento", nleft, nright);
-						//no tiene que tener parámetros
-							}else if(!f.type.getProduct().isEmpty()){
-								agregarError("El procedimiento'"+((String)pn.value)+
-								"' recibe "+(f.type.getProduct().size())+" parámetros. O suministrados", nleft, nright);
-						//ni tipo de retorno
-							}else if(((FunctionType)f.type).getRange() != null){
-								agregarError("'"+((String)pn.value)+"' no es un procedimiento", nleft, nright);
-						//SI es un procedimiento como debería:
-							}else{
-								gen("call", pn.value, "0", "");	
-							}
-						
-						}else{//si no está limpio, es un nombre normal, pero debe ser función, eh!
-							if(!(f.type instanceof FunctionType)){
-								agregarError("'"+((String)pn.value)+"' no es un procedimiento", nleft, nright);
-							}
-						}
-					}
-					:}
-				//TODO: poner en la tabla de símbolos, inicialmente, todas las sobrecargas de put y get. Y definir una función para sacarlos
-				//ya que no se permiten en la ST nombres repetidos...
+					{}
 				|	PUT actual_parameter_part:p SEMICOLON
-					{://ver si cumple con: sólo un parámetro, el tipo es o String, int, float o boolean
-						boolean v=validateBuiltIn("PUT", p, pleft, pright);						
-						if(v){
-							//assume it has only one element:
-							ParserResult uP=((ArrayList<ParserResult>)p).get(0);
-							String lugar=temp_nuevo();
-							String tipo=uP.type.getClass().getSimpleName();
-							gen("put", 
-								tipo.split("Type")[0],
-								uP.value,
-								"");
-							RESULT=new ParserResult("put", uP.type, lugar);
-						}
-						
-					:}
+					{}
 				|	GET LEFTPAR identifier:i RIGHTPAR SEMICOLON
-					{:
-					  AdaSymbol f=findSymbol(i, ileft, iright);
-					  if(f!=null){
-						if(!f.type.isPrimitive()){
-							agregarError("La función 'get' sólo acepta parámetros con tipos primitivos (boolean"+
-							"float o integer)", ileft, iright);
-						}else{
-							String tipo=f.type.getClass().getSimpleName();
-							String lugar=i.toString();
-							gen("get", tipo.split("Type")[0], "", lugar);
-						}
-					
-					  }
-					:}
+					{}
  				|	GET LEFTPAR selected_component:i RIGHTPAR SEMICOLON
-					{:
-					  AdaSymbol f=findSymbol(i, ileft, iright);
-					  if(f!=null){
-						if(!f.type.isPrimitive()){
-							agregarError("La función 'get' sólo acepta parámetros con tipos primitivos (boolean"+
-							"float o integer)", ileft, iright);
-						}else{
-							String tipo=f.type.getClass().getSimpleName();
-							String lugar=i.toString();
-							gen("get", tipo.split("Type")[0], "", lugar);
-						}
-					
-					  }
-					:}
+					{}
 				;
-/*Llamadas a funciones: si no tiene parámetros, sólo buscar la función (y que sea una que no tenga parámetros, eh)
-Si sí, habrá también que ver que cumplan con el dominio.*/
+
+
+/*Llamadas a funciones*/
+
 function_call			::=	name:n LEFTPAR RIGHTPAR
-				 	{:	
-						ParserResult pn=(ParserResult)n;
-						AdaSymbol f=findSymbol(pn.value, nleft, nright);	
-					        if (f==null)
-							RESULT=new ParserResult(pn.value);
-					  	else{//found, check if the function complies...
-						//check if it IS a function:
-							if(!(f.type instanceof FunctionType)){
-								agregarError("'"+((String)pn.value)+"' no es una función", nleft, nright);
-								RESULT=new ParserResult(pn.value);
-						//check if it is an empty parameter function:
-							}else if(!f.type.getProduct().isEmpty()){
-								agregarError("La función '"+((String)pn.value)+
-								"' recibe "+(f.type.getProduct().size())+" parámetros. O suministrados", nleft, nright);
-								RESULT=new ParserResult(pn.value);
-						//if it is a function with empty parameters, but no return type, is a procedure!
-							}else if(((FunctionType)f.type).getRange() == null){
-								agregarError("No se puede usar una llamada a procedimiento como operando", nleft, nright);
-								RESULT=new ParserResult(pn.value);
-						//it IS a function (i.e it HAS return type:)
-							}else{
-								//it's safe to generate the code, then:
-								String lugar=temp_nuevo();
-								gen("call", pn.value, "0", lugar);							
-								RESULT=new ParserResult(pn.value, f.type, lugar);
-							}
-						}
-					:}
+				 	{}
 				|	name:n actual_parameter_part:p 
-					{:
-					ParserResult pn=(ParserResult)n;
-					AdaSymbol f=findSymbol(pn.value, nleft, nright);
-					if(f==null)
-						RESULT=new ParserResult(pn.value);
-					else{
-						if(!(f.type instanceof FunctionType)){
-							agregarError("'"+((String)pn.value)+"' no es una función", nleft, nright);
-							RESULT=new ParserResult(pn.value);
-						}else{//la función existe: 
-						//ver si está llamado con el número correcto de parámetros:
-							if(!(f.type.getProduct().size()==((ArrayList<ParserResult>)p).size())){
-								agregarError("La función '"+((String)pn.value)+
-								"' recibe "+(f.type.getProduct().size())+" parámetros. "+
-								String.valueOf(((ArrayList<ParserResult>)p).size())
-								+" suministrados", nleft, nright);
-								RESULT=new ParserResult(pn.value);	
-							}else{//el número de parámetros es correcto, vamos a ver si son iguales:
-								int i=0;
-								ArrayList<ParserResult> pr=(ArrayList<ParserResult>)p;
-								Type found;Type expected;			
-								for(;i<f.type.getProduct().size();i++){
-									found=pr.get(i).type;
-									expected=f.type.getProduct().get(i);		
-									if(!expected.equals(found)){
-										agregarError("Argumento incorrecto para la función '"+((String)pn.value)+"'"+
-										" encontrado '"+found.toString()+"', se esperaba '"+expected.toString()+"'",
-										nleft, nright);
-										break;			
-									}
-								}//si termina, el tipo de los parámetros es correcto
-								if(i==f.type.getProduct().size()){
-									//generar, entonces, el código:
-									for(ParserResult res: pr){
-										gen("param", res.value, "", "");
-									}	
-									String lugar=temp_nuevo();
-									gen("call", pn.value, pr.size(), lugar);					
-									RESULT=new ParserResult(pn.value, f.type, lugar);
-								}else{
-									RESULT=new ParserResult(pn.value);
-								}
-								
-							}//el número de parámetros es correcto 
-								
-						}//es una función
-					}//se encontró el id
-					//create a new dummy function to compare it with this.
-					:}
+					{}
 				;
-/*Esta no me parece tan poderosa:
-put_call	::= PUT LEFTPAR actual_parameter_list RIGHTPAR
-y simil para get
-pero quería sólo dejar que pusieran expresiones booleanas, enteras y float allí...
-supongo que queda para el semántico...
-*/
 
-actual_parameter_part		::=	 LEFTPAR argument_list:a RIGHTPAR {:RESULT=a;:}			
+actual_parameter_part		::=	 LEFTPAR argument_list:a RIGHTPAR {}			
 				;
-//de p85-persch, pag 95: quité todo
 
-/*acá irían las renaming declaration, y comienza lo relacionado con tasks:
-* entry, accept, select y abort
-*/
-//de p85-persch, pag 96:
-/*acá sigue lo de tasks: entry, delay, select y abort*/
 compilation			::=	compilation_list
 				;
-//a esta le falta una tal lista de pragmas, pero como no manejaremos pragmas, no la pongo:
 compilation_list		::= 	compilation_unit
 				|	compilation_list compilation_unit
 				|	error
 				;
-//de p85-persch, pag 97:
 compilation_unit		::=	subprogram_declaration
 				|	subprogram_body					
 				;
-//de p85-persch, pag 98:
 code_statement			::=	qualified_expression SEMICOLON
 				;

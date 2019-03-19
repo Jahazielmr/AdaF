@@ -8,7 +8,7 @@ import java.util.HashMap;
 //Terminales sin valor de retorno:
 
 //Palabras reservadas
-
+//
 terminal ABORT, ABS, ABSTRACT, ACCEPT, ACCESS, ALIASED, ALL, AND, ARRAY, AT;
 terminal BEGIN, BODY;
 terminal CASE, CONSTANT;
@@ -145,31 +145,31 @@ precedence left AND_THEN, OR_ELSE;
 
 start with goal;
 
-constant_option	::=	| CONSTANT {};
+constant_option	::=	| CONSTANT {::};
 
-goal	::=	compilation:g {}
+goal	::=	compilation:g {::}
 	;
 
 placeholder ::= ;
 
-m	::= {}
+m	::= {::}
 	; 
-n	::= {}
+n	::= {::}
 	;
 
-numeric_type		::=	INTEGER:i	{}
-			|	FLOAT:f   {}
+numeric_type		::=	INTEGER:i	{::}
+			|	FLOAT:f   {::}
 			;
-primitive_type 		::=	BOOLEAN:b {}
-			|	numeric_type:t {}
+primitive_type 		::=	BOOLEAN:b {::}
+			|	numeric_type:t {::}
 			;
-identifier	::=	IDENTIFIER:i {}
+identifier	::=	IDENTIFIER:i {::}
 		;
 argument_list	::=	argument:a
-			{}
+			{::}
 		;
 argument	::=	expression:e 
-			{}
+			{::}
 		; 
 
 //Declaraciones
@@ -182,44 +182,44 @@ declaration	::=	object_declaration
 		;
 
 object_declaration	::=	identifier:i COLON constant_option:c subtype_indication:s  initialization_option:o SEMICOLON
-				{}
+				{::}
 			;
-initialization_option	::=	| ASSIGNMENT expression:e {}
+initialization_option	::=	| ASSIGNMENT expression:e {::}
 			;
 number_declaration	::=	identifier:i COLON CONSTANT ASSIGNMENT expression:o SEMICOLON
-				{}
+				{::}
 			;
 identifier_list		::=	identifier:i COMMA identifier:j 
-				{}
+				{::}
 			;
 
 type_declaration	::=	TYPE identifier:i 
-				 discriminant_part_option:p IS {} type_definition:t SEMICOLON 
-				{}
+				 discriminant_part_option:p IS {::} type_definition:t SEMICOLON 
+				{::}
 			|	incomplete_type_declaration
 			;
 discriminant_part_option ::=	| discriminant_part
 			;
-type_definition		::=	record_type_definition:r {}
+type_definition		::=	record_type_definition:r {::}
 			;
 subtype_declaration	::=	SUBTYPE identifier:i IS subtype_indication:s SEMICOLON
-				{}
+				{::}
 			;
 
-subtype_indication	::=	name:n {}
-			|	subtype_indication_with_constraint:c {}
-			|	primitive_type:t {}
+subtype_indication	::=	name:n {::}
+			|	subtype_indication_with_constraint:c {::}
+			|	primitive_type:t {::}
 			;
 
 subtype_indication_with_constraint ::=	name range_constraint
 				   |	name accuracy_constraint
-				   |	numeric_type:n range_constraint {}
-				   |	FLOAT 	accuracy_constraint {}
+				   |	numeric_type:n range_constraint {::}
+				   |	FLOAT 	accuracy_constraint {::}
 		         	   ;
 range_constraint		   ::= RANGE range
 				   ;
 range	::=	simple_expression:t DOUBLEDOT simple_expression:f
-		{}
+		{::}
 	;
 
 accuracy_constraint		::=	floating_point_constraint
@@ -233,40 +233,40 @@ fixed_point_constraint		::=	DELTA simple_expression range_constraint_option
 				;
 discrete_range			::=	name range_constraint_option
 				|	numeric_type range_constraint_option
-				|	range:r {}
+				|	range:r {::}
 				;
 record_type_definition		::=	RECORD:r  
-					{}
+					{::}
 					END RECORD 
 				;
 
-component_list			::=	component_declaration_list:l {} variant_part_option 
-				|	NULL {}SEMICOLON
-				;
+//component_list			::=	component_declaration_list:l {::} variant_part_option 
+//				|	NULL {::}SEMICOLON
+//				;
 
-component_declaration_list	::=	{}
-				|	 component_declaration_list:l component_declaration:c
-					{}
-				;
-variant_part_option		::=	| variant_part
-				;
-component_declaration		::=	discriminant_declaration:d {} SEMICOLON 
-				|	error 
-				;
+//component_declaration_list	::=	{::}
+//				|	 component_declaration_list:l component_declaration:c
+//					{::}
+//				;
+//variant_part_option		::=	| variant_part
+//				;
+//component_declaration		::=	discriminant_declaration:d {::} SEMICOLON 
+//				|	error 
+//				;
 discriminant_part		::=	LEFTPAR discriminant_declaration_list RIGHTPAR
 				;
 discriminant_declaration_list	::=	discriminant_declaration
 				|	discriminant_declaration_list SEMICOLON discriminant_declaration
 				;
 discriminant_declaration	::=	identifier:i COLON subtype_indication:s initialization_option:o
-					{}
+					{::}
 				|	identifier_list:l COLON subtype_indication:s initialization_option:o
-					{}
+					{::}
 				;
-variant_part 			::=	CASE name IS variant_list END CASE SEMICOLON
-				;
-variant_list			::=	| variant_list WHEN choice_list ARROW component_list
-				;
+//variant_part 			::=	CASE name IS variant_list END CASE SEMICOLON
+//				;
+//variant_list			::=	 variant_list WHEN choice_list ARROW component_list
+//				;
 choice				::=	simple_expression
 				|	OTHERS
 				|	name range_constraint
@@ -287,25 +287,25 @@ declarative_item		::=	declaration
 				;
 
 name				::=	identifier:i 
-					{}
-				|	selected_component:s {}
-				|	function_call:f {}
+					{::}
+				|	selected_component:s {::}
+				|	function_call:f {::}
 				|	operator_symbol:i 
-					{}
+					{::}
 				;
 
 selected_component		::=	name:n POINT identifier:i 
-					{}
-				|	name:n POINT ALL {}
+					{::}
+				|	name:n POINT ALL {::}
 				|	name POINT operator_symbol
 				;
 
-literal				::=	INTEGER_LITERAL:i	{}
-				|	FLOATING_POINT_LITERAL:f	{}
-				|	CHARACTER_LITERAL:c	{}
+literal				::=	INTEGER_LITERAL:i	{::}
+				|	FLOATING_POINT_LITERAL:f	{::}
+				|	CHARACTER_LITERAL:c	{::}
 				|	BOOLEAN_LITERAL:b	
-					{}
-				|	NULL:n		  	{}
+					{::}
+				|	NULL:n		  	{::}
 					
 				;
 aggregate			::=	LEFTPAR component_association_list RIGHTPAR
@@ -317,135 +317,135 @@ component_association_list	::=	component_association COMMA component_association
 component_association		::=	expression
 				|	choice_list ARROW expression
 				;
-expression			::=	relation:e 	{}
-				|	and_expression:e {}
-				|	or_expression:e {}
-				|	xor_expression:e {}
-				|	andthen_expression:e {}
-				|	orelse_expression:e {}
+expression			::=	relation:e 	{::}
+				|	and_expression:e {::}
+				|	or_expression:e {::}
+				|	xor_expression:e {::}
+				|	andthen_expression:e {::}
+				|	orelse_expression:e {::}
 				;
 //de p85-persch, pag 91
 and_expression			::=	relation:p AND m:m relation:q
-					{}
+					{::}
 				|	and_expression:p AND m:m relation:q
-					{}
+					{::}
 				;
 or_expression			::=	relation:p OR m:m relation:q
-					{}
+					{::}
 				|	or_expression:p OR m:m relation:q
-					{}
+					{::}
 				;
 xor_expression			::=	relation:p XOR relation:q
-					{}
+					{::}
 				|	xor_expression:p XOR relation:q
-					{}
+					{::}
 				;
-andthen_expression		::=	relation:p AND_THEN m:m relation:q {}
+andthen_expression		::=	relation:p AND_THEN m:m relation:q {::}
 				|	andthen_expression:p AND_THEN m:m relation:q
-					{}
+					{::}
 				;
 orelse_expression		::=	relation:p OR_ELSE m:m relation:q
-					{}
+					{::}
 				|	orelse_expression:p OR_ELSE m:m relation:q
-					{}
+					{::}
 				;
 
 relation			::=	simple_expression:s 
-					{}
+					{::}
 				|	simple_expression:p relational_operator:o simple_expression:q
-					{}
+					{::}
 				|	simple_expression:p membership_operator range:q
-					{}
+					{::}
 				|	simple_expression:p membership_operator subtype_indication:s
-					{}
+					{::}
 				;
 membership_operator		::=	IN
 				|	NOT IN
 				;
 simple_expression		::=	term_list:t
-					{}
+					{::}
 				|	unary_operator:o term_list:t
-					{}	
+					{::}	
 				;
 term_list			::=	term:t
-					{}
+					{::}
 				|	term_list:p adding_operator:o term:q
-					{}
+					{::}
 				;
 term				::=	factor:f
-					{}
+					{::}
 				|	term:p multiplying_operator:o factor:q
-					{}
+					{::}
 				;
 factor				::=	primary:p
-					{}
+					{::}
 				|	primary:p EXPONENTIATE primary:q
-					{}
+					{::}
 				;
-primary				::=	literal:l {}
+primary				::=	literal:l {::}
 				|	aggregate
 				|	name:n
-					{}
+					{::}
 				|	allocator
 				|	qualified_expression
-				|	LEFTPAR expression:e RIGHTPAR {}
+				|	LEFTPAR expression:e RIGHTPAR {::}
 				;
-relational_operator		::=	EQUAL {}
-				|	INEQUALITY {}
-				|	LT	{}
-				|	GT	{}
-				|	GTEQ{}
-				|	LTEQ {}
+relational_operator		::=	EQUAL {::}
+				|	INEQUALITY {::}
+				|	LT	{::}
+				|	GT	{::}
+				|	GTEQ{::}
+				|	LTEQ {::}
 				;
-adding_operator			::=	PLUS {}	
-				|	MINUS {}
-				|	CONCATENATE {}
+adding_operator			::=	PLUS {::}	
+				|	MINUS {::}
+				|	CONCATENATE {::}
 				;
-unary_operator			::=	PLUS:p {}
-				|	MINUS:m {}
-				|	NOT:n	{}
-				|	ABS:a	{}
+unary_operator			::=	PLUS:p {::}
+				|	MINUS:m {::}
+				|	NOT:n	{::}
+				|	ABS:a	{::}
 				;
-multiplying_operator		::=	MULTIPLY {}
-				|	DIVIDE {}
-				|	MOD {}
-				|	REM {}
+multiplying_operator		::=	MULTIPLY {::}
+				|	DIVIDE {::}
+				|	MOD {::}
+				|	REM {::}
 				;
 qualified_expression		::=	name TICK LEFTPAR expression RIGHTPAR
 				|	name TICK aggregate
 				;
 allocator			::=	NEW name
 				;
-sequence_of_statements		::=	statement:s {}
+sequence_of_statements		::=	statement:s {::}
 				|	sequence_of_statements:q m:m statement:s
-					{}
+					{::}
 				;
 
-statement			::=	label_list simple_statement:s {}
-				|	label_list compound_statement:c {}
+statement			::=	label_list simple_statement:s {::}
+				|	label_list compound_statement:c {::}
 				|	error 
 				;
 label_list			::=	| label_list label
 				;
 simple_statement		::=	null_statement:n
-					{}
+					{::}
 				|	assignment_statement:a
-					{}
+					{::}
 				|	exit_statement:e
-					{}
+					{::}
 				|	return_statement:e 
-					{}
+					{::}
 				|	goto_statement:g
-					{}
+					{::}
 				|	procedure_call:p
-					{}
+					{::}
 				|	code_statement:c
-					{}
+					{::}
 				;
-compound_statement		::=	if_statement:s {}
+compound_statement		::=	if_statement:s {::}
 				|	loop_statement:s 
-						{}
-				|	block{}
+						{::}
+				|	block{::}
 				;
 label				::=	LEFTLABEL identifier RIGHTLABEL
 				;
@@ -453,67 +453,67 @@ null_statement			::=	NULL SEMICOLON
 				;
 
 assignment_statement		::=	name:n ASSIGNMENT expression:e SEMICOLON
-					{}
+					{::}
 				;
 if_header			::= 	IF:i condition:c THEN 
-					{}m:m sequence_of_statements:s 
-					{}
+					{::}m:m sequence_of_statements:s 
+					{::}
 				;
 if_statement			::=	if_header:header	
 						else_option:els 
 					END IF SEMICOLON 
-					{}
+					{::}
 				|	if_header:header
 						n:n m:mdos  elsif_list:elsif
 						else_option:els
 					END IF SEMICOLON
-					{} 
+					{::} 
 				;
 
 elsif_list			::=	ELSIF condition:c THEN m:m sequence_of_statements:s
-					{}
+					{::}
 				
 					| elsif_list:elsif n:n ELSIF m:muno condition:c THEN m:mdos sequence_of_statements:s
-					 {} 
+					 {::} 
 				;
 
 else_option			::=	| n:n ELSE m:m sequence_of_statements:s
-				{}
+				{::}
 				;
-condition			::=	expression:e {}
+condition			::=	expression:e {::}
 				;
 //Bloque case, seguido de la alternative_list
 loop_statement			::=	iteration_clause_option:o
 					 m:m basic_loop:s SEMICOLON
-					{}
+					{::}
 					placeholder
-					{}
+					{::}
 				|	identifier:i COLON iteration_clause_option:o
 					m:m basic_loop:s identifier:j SEMICOLON
-					{}	
+					{::}	
 				;
 basic_loop			::=	LOOP:l
-					{}
+					{::}
 						sequence_of_statements:s 
 					END LOOP
-					{}  
+					{::}  
 				;
 
 iteration_clause_option		::=
 				|	FOR identifier:i IN discrete_range:r m:m
-					{}
+					{::}
 				|	FOR identifier:i IN REVERSE discrete_range:r m:m
-					{}
+					{::}
 				|	WHILE m:m condition:c 
-					 {} 
+					 {::} 
 				;
 block				::=	declare_part_option BEGIN:b 
-					{}
+					{::}
 						sequence_of_statements 
 					END SEMICOLON  
 				|	identifier:i  COLON declare_part_option
 						 BEGIN 
-						 {}	
+						 {::}	
 							sequence_of_statements 
 						 END identifier SEMICOLON  
 				;
@@ -522,17 +522,17 @@ declare_part_option		::=
 				;
 
 exit_statement			::=	EXIT name_option:n when_option:w SEMICOLON
-					{}
+					{::}
 				;
-name_option			::=	| name:n {}
+name_option			::=	| name:n {::}
 				;
 when_option			::=	| WHEN m:m condition:c 
-					 {} 
+					 {::} 
 				;
 return_statement		::=	RETURN SEMICOLON
-					{}
+					{::}
 				|	RETURN expression:e SEMICOLON 
-					{}
+					{::}
 				;
 goto_statement			::=	GOTO name SEMICOLON 
 				;
@@ -540,74 +540,74 @@ goto_statement			::=	GOTO name SEMICOLON
 subprogram_declaration		::=	subprogram_specification SEMICOLON
 				;	 
 subprogram_specification	::=	PROCEDURE identifier:i formal_part_option:f
-					{}
+					{::}
 				|	FUNCTION designator:d formal_part_option:f RETURN subtype_indication:s
-					{}
+					{::}
 				;
 subprogram_specification_is	::=	PROCEDURE identifier:i IS 
-					{}
+					{::}
 				|	PROCEDURE identifier:i formal_part:f IS 
-					{}
+					{::}
 				|	FUNCTION designator:i formal_part_option:f RETURN subtype_indication:s IS 
-					{}
+					{::}
 				;
 
-designator			::=	identifier:i {} 
-				|	operator_symbol:o {}
+designator			::=	identifier:i {::} 
+				|	operator_symbol:o {::}
 				;
 operator_symbol			::=	STRING_LITERAL:s 
-					{}
+					{::}
 				;
-formal_part			::=	LEFTPAR parameter_declaration_list:l {} RIGHTPAR
+formal_part			::=	LEFTPAR parameter_declaration_list:l {::} RIGHTPAR
 				;
-formal_part_option		::=	| formal_part:f {}
+formal_part_option		::=	| formal_part:f {::}
 				;
-parameter_declaration_list	::=	parameter_declaration:d {}
+parameter_declaration_list	::=	parameter_declaration:d {::}
 				|	parameter_declaration_list:l SEMICOLON parameter_declaration:d
-					{}
+					{::}
 				;
 parameter_declaration		::=	identifier:i COLON mode:m subtype_indication:s initialization_option:o
-					{}
+					{::}
 				|	identifier_list:l COLON mode:m subtype_indication:s initialization_option:o
-					{}
+					{::}
 				;
-mode				::=	{} 
-				|	IN {}
-				|	OUT {}
-				|	IN OUT {}
+mode				::=	{::} 
+				|	IN {::}
+				|	OUT {::}
+				|	IN OUT {::}
 				;
 subprogram_body			::=	subprogram_specification_is:s 
 						declarative_part 
 					BEGIN:b  
-					{}
+					{::}
 						sequence_of_statements:t
 					END designator_option:e SEMICOLON
-					{} placeholder 
-					{}
+					{::} placeholder 
+					{::}
 				;
 designator_option		::=	| designator:d {:RESULT=d;:}
 				;
 
 procedure_call			::=	name:n SEMICOLON 
-					{}
+					{::}
 				|	PUT actual_parameter_part:p SEMICOLON
-					{}
+					{::}
 				|	GET LEFTPAR identifier:i RIGHTPAR SEMICOLON
-					{}
+					{::}
  				|	GET LEFTPAR selected_component:i RIGHTPAR SEMICOLON
-					{}
+					{::}
 				;
 
 
 /*Llamadas a funciones*/
 
 function_call			::=	name:n LEFTPAR RIGHTPAR
-				 	{}
+				 	{::}
 				|	name:n actual_parameter_part:p 
-					{}
+					{::}
 				;
 
-actual_parameter_part		::=	 LEFTPAR argument_list:a RIGHTPAR {}			
+actual_parameter_part		::=	 LEFTPAR argument_list:a RIGHTPAR {::}			
 				;
 
 compilation			::=	compilation_list

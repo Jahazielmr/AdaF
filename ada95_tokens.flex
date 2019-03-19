@@ -282,3 +282,4 @@ or_else="or"{whitespace}"else"
 /*Si la entrada no pega con nada, devolver error léxico*/
 [^]    { lexical_errors.add("Error léxico: caracter inesperado: '"+yytext()+"' en línea "+String.valueOf(yyline+1)+", columna "+String.valueOf(yycolumn+1)); }
 
+{.} {system.out.println("error lexico, no se reconoce el token de entrada")} 
